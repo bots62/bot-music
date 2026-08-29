@@ -1,7 +1,7 @@
 {
-  "name": "music-bot",
+  "name": "discord-music-bot",
   "version": "1.0.0",
-  "description": "Discord Music Bot with Voice Channel Controls",
+  "description": "Discord Music Bot with Voice Controls",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,5 +10,8 @@
     "@discordjs/voice": "^0.16.1",
     "discord.js": "^14.14.1",
     "play-dl": "^1.9.7"
+  },
+  "engines": {
+    "node": ">=18.x"
   }
 }
