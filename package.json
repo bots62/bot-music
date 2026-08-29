@@ -1,0 +1,17 @@
+{
+  "name": "discord-music-bot",
+  "version": "1.0.0",
+  "description": "Arabic Music Bot with interactive panel and voice channel management",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "@discordjs/voice": "^0.16.1",
+    "sodium": "^3.0.2",
+    "tweetnacl": "^1.0.3",
+    "play-dl": "^1.9.7",
+    "dotenv": "^16.4.5"
+  }
+}
