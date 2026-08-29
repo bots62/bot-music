@@ -73,6 +73,53 @@ async function sendOrUpdatePanel() {
     }
 }
 
+// دالة لتجديد رسالة الأزرار كل 5 دقائق بدون التأثير على الأغنية أو إعداداتها
+async function setupControlRefresh(voiceChannelId) {
+    const interval = setInterval(async () => {
+        const session = activeSessions.get(voiceChannelId);
+        if (!session) {
+            return clearInterval(interval);
+        }
+
+        try {
+            const channel = await client.channels.fetch(session.channelId).catch(() => null);
+            if (!channel) return;
+
+            // حذف الرسالة القديمة
+            if (session.controlMsgId) {
+                const oldMsg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
+                if (oldMsg) await oldMsg.delete().catch(() => {});
+            }
+
+            const controlEmbed = new EmbedBuilder()
+                .setColor('#2b2d31')
+                .setDescription('تحكم ببوت الاغاني من هنا');
+
+            const row1 = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
+            );
+
+            const row2 = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
+            );
+
+            const newMsg = await channel.send({
+                embeds: [controlEmbed],
+                components: [row1, row2]
+            });
+
+            session.controlMsgId = newMsg.id;
+        } catch (e) {
+            console.error('Error refreshing control message:', e);
+        }
+    }, 5 * 60 * 1000); // كل 5 دقائق
+
+    return interval;
+}
+
 client.on('interactionCreate', async interaction => {
     if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'music_panel_menu') {
@@ -80,8 +127,15 @@ client.on('interactionCreate', async interaction => {
             const member = interaction.member;
             const voiceChannel = member?.voice?.channel;
 
-            // الرد الفوري لمنع خطأ الـ Timeout
-            await interaction.deferUpdate().catch(() => {});
+            // إعادة القائمة لحالتها الطبيعية فوراً لتفادي علامة الصح ومنع التعليق
+            await interaction.update({ components: [
+                new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('music_panel_menu')
+                        .setPlaceholder('Choose an order from the list')
+                        .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                )
+            ] }).catch(() => {});
 
             if (choice === 'add_bot') {
                 if (!voiceChannel) {
@@ -135,6 +189,8 @@ client.on('interactionCreate', async interaction => {
                         });
                     });
 
+                    const refreshInterval = await setupControlRefresh(voiceChannel.id);
+
                     activeSessions.set(voiceChannel.id, {
                         connection,
                         player,
@@ -143,7 +199,8 @@ client.on('interactionCreate', async interaction => {
                         volume: 100,
                         currentSong: null,
                         controlMsgId: controlMsg.id,
-                        channelId: targetTextChannel.id
+                        channelId: targetTextChannel.id,
+                        refreshInterval
                     });
 
                     await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
@@ -341,6 +398,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     for (const [channelId, session] of activeSessions.entries()) {
         if (oldState.member && oldState.member.id === session.ownerId && oldState.channelId === channelId && newState.channelId !== channelId) {
             try {
+                if (session.refreshInterval) clearInterval(session.refreshInterval);
                 if (session.connection) {
                     session.connection.destroy();
                 }
@@ -359,6 +417,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
+                if (session.refreshInterval) clearInterval(session.refreshInterval);
                 if (session.controlMsgId) {
                     try {
                         const channel = await client.channels.fetch(session.channelId);
