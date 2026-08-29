@@ -1,7 +1,7 @@
 {
   "name": "discord-music-bot",
   "version": "1.0.0",
-  "description": "Arabic Music Bot with interactive panel and voice channel management",
+  "description": "Arabic Music Bot with interactive panel",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
