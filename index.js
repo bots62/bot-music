@@ -37,7 +37,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
 
-    // التحديث التلقائي لرسائل الأزرار كل 5 دقائق (حذف وإعادة إرسال فورية)
+    // التحديث التلقائي لرسائل الأزرار كل 5 دقائق (حذف وإعادة إرسال فورية بنفس التنسيق)
     setInterval(async () => {
         for (const [channelId, session] of activeSessions.entries()) {
             try {
@@ -159,6 +159,18 @@ client.on('interactionCreate', async interaction => {
                     if (!targetTextChannel) {
                         targetTextChannel = interaction.channel;
                     }
+
+                    // حذف رسالة القائمة القديمة من روم اللوحة الأساسي فور إضافة البوت بنجاح
+                    try {
+                        const panelChannel = await client.channels.fetch(PANEL_CHANNEL_ID);
+                        if (panelChannel) {
+                            const messages = await panelChannel.messages.fetch({ limit: 10 });
+                            const panelMsg = messages.find(m => m.author.id === client.user.id);
+                            if (panelMsg) {
+                                await panelMsg.delete().catch(() => {});
+                            }
+                        }
+                    } catch (e) {}
 
                     const connection = joinVoiceChannel({
                         channelId: voiceChannel.id,
@@ -413,6 +425,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                 console.error('Error removing bot on owner leave:', e);
             }
             activeSessions.delete(channelId);
+            await sendOrUpdatePanel();
         }
     }
 
@@ -431,6 +444,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                 activeSessions.delete(channelId);
             }
         }
+        await sendOrUpdatePanel();
     }
 });
 
