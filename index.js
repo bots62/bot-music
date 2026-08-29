@@ -60,11 +60,11 @@ async function sendOrUpdatePanel() {
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
-        const messages = await channel.messages.fetch({ limit: 5 });
-        const existing = messages.find(m => m.author.id === client.user.id);
+        const messages = await channel.messages.fetch({ limit: 10 });
+        const existing = messages.find(m => m.author.id === client.user.id && m.components.length > 0);
         
         if (existing) {
-            await existing.edit({ embeds: [embed], components: [row] });
+            await existing.edit({ embeds: [embed], components: [row] }).catch(() => {});
         } else {
             await channel.send({ embeds: [embed], components: [row] });
         }
@@ -80,7 +80,7 @@ client.on('interactionCreate', async interaction => {
             const member = interaction.member;
             const voiceChannel = member?.voice?.channel;
 
-            // إرجاع القائمة لوضعها الطبيعي فوراً
+            // إرجاع القائمة لوضعها الطبيعي فوراً دون حذف اللوحة
             await interaction.update({ components: [
                 new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -104,18 +104,6 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    // حذف رسالة اللوحة الأساسية من الروم فوراً لضمان عدم بقائها
-                    try {
-                        const panelChannel = await client.channels.fetch(PANEL_CHANNEL_ID);
-                        if (panelChannel) {
-                            const messages = await panelChannel.messages.fetch({ limit: 10 });
-                            const panelMsg = messages.find(m => m.author.id === client.user.id);
-                            if (panelMsg) {
-                                await panelMsg.delete().catch(() => {});
-                            }
-                        }
-                    } catch (e) {}
-
                     const connection = joinVoiceChannel({
                         channelId: voiceChannel.id,
                         guildId: voiceChannel.guild.id,
@@ -127,21 +115,50 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    // تخزين الجلسة بدون إرسال رسائل أزرار مزعجة في الشات العام
+                    // إرسال رسالة الأزرار بالخلفية السوداء في شات الروم الصوتي أو الشات المرتبط به
+                    let targetTextChannel = voiceChannel; // شات الروم الصوتي نفسه
+                    
+                    const controlEmbed = new EmbedBuilder()
+                        .setColor('#2b2d31')
+                        .setDescription('تحكم ببوت الاغاني من هنا');
+
+                    const row1 = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
+                    );
+
+                    const row2 = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
+                    );
+
+                    const controlMsg = await targetTextChannel.send({
+                        content: `مرحباً بك <@${member.id}>`,
+                        embeds: [controlEmbed],
+                        components: [row1, row2]
+                    }).catch(async () => {
+                        // لو الروم الصوتي ما يدعم الشات المباشر، يرسلها في الشات العام الحالي
+                        return await interaction.channel.send({
+                            content: `مرحباً بك <@${member.id}>`,
+                            embeds: [controlEmbed],
+                            components: [row1, row2]
+                        });
+                    });
+
                     activeSessions.set(voiceChannel.id, {
                         connection,
                         player,
                         ownerId: member.id,
                         allowedUsers: [member.id],
                         volume: 100,
-                        currentSong: null
+                        currentSong: null,
+                        controlMsgId: controlMsg.id,
+                        channelId: targetTextChannel.id
                     });
 
-                    await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
-                    await sendOrUpdatePanel();
                 } catch (err) {
                     console.error(err);
-                    await sendOrUpdatePanel();
                 }
             }
         }
@@ -337,21 +354,33 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                 if (session.connection) {
                     session.connection.destroy();
                 }
-            } catch (e) {
-                console.error('Error removing bot on owner leave:', e);
-            }
+                if (session.controlMsgId) {
+                    const channel = await client.channels.fetch(session.channelId).catch(() => null);
+                    if (channel) {
+                        const msg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
+                        if (msg) await msg.delete().catch(() => {});
+                    }
+                }
+            } catch (e) {}
             activeSessions.delete(channelId);
-            await sendOrUpdatePanel();
         }
     }
 
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
+                if (session.controlMsgId) {
+                    try {
+                        const channel = await client.channels.fetch(session.channelId);
+                        if (channel) {
+                            const msg = await channel.messages.fetch(session.controlMsgId);
+                            if (msg) await msg.delete().catch(() => {});
+                        }
+                    } catch (e) {}
+                }
                 activeSessions.delete(channelId);
             }
         }
-        await sendOrUpdatePanel();
     }
 });
 
