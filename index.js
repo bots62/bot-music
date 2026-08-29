@@ -4,6 +4,8 @@ const {
     Partials, 
     EmbedBuilder, 
     ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle,
     StringSelectMenuBuilder, 
     ModalBuilder, 
     TextInputBuilder, 
@@ -67,111 +69,130 @@ async function sendOrUpdatePanel() {
 }
 
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isStringSelectMenu() && !interaction.isModalSubmit()) return;
+    if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'music_panel_menu') {
+            const choice = interaction.values[0];
+            const member = interaction.member;
+            const voiceChannel = member.voice.channel;
 
-    if (interaction.customId === 'music_panel_menu') {
-        const choice = interaction.values[0];
-        const member = interaction.member;
-        const voiceChannel = member.voice.channel;
+            if (choice === 'add_bot') {
+                if (!voiceChannel) {
+                    await sendOrUpdatePanel();
+                    return interaction.update({ components: [
+                        new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder()
+                                .setCustomId('music_panel_menu')
+                                .setPlaceholder('Choose an order from the list')
+                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                        )
+                    ] }).catch(() => {});
+                }
 
-        if (choice === 'add_bot') {
-            if (!voiceChannel) {
-                return interaction.reply({ content: 'ادخل روم صوتية أولا!', ephemeral: true });
-            }
+                if (activeSessions.has(voiceChannel.id)) {
+                    await sendOrUpdatePanel();
+                    return interaction.update({ components: [
+                        new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder()
+                                .setCustomId('music_panel_menu')
+                                .setPlaceholder('Choose an order from the list')
+                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                        )
+                    ] }).catch(() => {});
+                }
 
-            if (activeSessions.has(voiceChannel.id)) {
-                return interaction.reply({ content: 'هذا الروم فيه بوت من قبل!', ephemeral: true });
-            }
+                try {
+                    const connection = joinVoiceChannel({
+                        channelId: voiceChannel.id,
+                        guildId: voiceChannel.guild.id,
+                        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                    });
 
-            try {
-                const connection = joinVoiceChannel({
-                    channelId: voiceChannel.id,
-                    guildId: voiceChannel.guild.id,
-                    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-                });
+                    const player = createAudioPlayer();
+                    connection.subscribe(player);
 
-                const player = createAudioPlayer();
-                connection.subscribe(player);
+                    const controlEmbed = new EmbedBuilder()
+                        .setColor('#2b2d31')
+                        .setDescription('تحكم ببوت الاغاني من هنا');
 
-                const controlEmbed = new EmbedBuilder()
-                    .setColor('#2b2d31')
-                    .setDescription('تحكم ببوت الاغاني من هنا');
+                    const row1 = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
+                    );
 
-                const controlMenu = new StringSelectMenuBuilder()
-                    .setCustomId('bot_control_menu')
-                    .setPlaceholder('Choose an order from the list')
-                    .addOptions([
-                        { label: 'رفع الصوت', value: 'volume_control' },
-                        { label: 'تشغيل اغنية', value: 'search_song' },
-                        { label: 'ايقاف الاغنية', value: 'stop_song' },
-                        { label: 'صلاحية', value: 'give_perm' },
-                        { label: 'ازالة صلاحية', value: 'remove_perm' }
-                    ]);
+                    const row2 = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
+                    );
 
-                const row = new ActionRowBuilder().addComponents(controlMenu);
-                const controlMsg = await interaction.channel.send({
-                    content: `مرحباً بك <@${member.id}>`,
-                    embeds: [controlEmbed],
-                    components: [row]
-                });
+                    let targetTextChannel = voiceChannel;
+                    try {
+                        const fetchedGuild = await interaction.guild.fetch();
+                        const channels = await fetchedGuild.channels.fetch();
+                        const foundText = channels.find(c => c && c.parentId === voiceChannel.parentId && c.type === 0);
+                        if (foundText) {
+                            targetTextChannel = foundText;
+                        }
+                    } catch (e) {}
 
-                activeSessions.set(voiceChannel.id, {
-                    connection,
-                    player,
-                    ownerId: member.id,
-                    allowedUsers: [member.id],
-                    volume: 100,
-                    currentSong: null,
-                    controlMsgId: controlMsg.id,
-                    channelId: interaction.channel.id
-                });
+                    const controlMsg = await targetTextChannel.send({
+                        content: `مرحباً بك <@${member.id}>`,
+                        embeds: [controlEmbed],
+                        components: [row1, row2]
+                    });
 
-                // إعادة اللوحة الأساسية وإزالة علامة الصح واختيار القائمة فوراً
-                await sendOrUpdatePanel();
-                return interaction.deferUpdate().catch(() => {});
-            } catch (err) {
-                console.error(err);
-                return interaction.reply({ content: 'حدث خطأ أثناء محاولة دخول الروم.', ephemeral: true });
+                    activeSessions.set(voiceChannel.id, {
+                        connection,
+                        player,
+                        ownerId: member.id,
+                        allowedUsers: [member.id],
+                        volume: 100,
+                        currentSong: null,
+                        controlMsgId: controlMsg.id,
+                        channelId: targetTextChannel.id
+                    });
+
+                    await sendOrUpdatePanel();
+                    return interaction.update({ components: [
+                        new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder()
+                                .setCustomId('music_panel_menu')
+                                .setPlaceholder('Choose an order from the list')
+                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                        )
+                    ] }).catch(() => {});
+                } catch (err) {
+                    console.error(err);
+                    await sendOrUpdatePanel();
+                    return interaction.update({ components: [
+                        new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder()
+                                .setCustomId('music_panel_menu')
+                                .setPlaceholder('Choose an order from the list')
+                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                        )
+                    ] }).catch(() => {});
+                }
             }
         }
     }
 
-    if (interaction.customId === 'bot_control_menu') {
-        const choice = interaction.values[0];
+    if (interaction.isButton()) {
         const member = interaction.member;
-        const voiceChannel = member.voice.channel;
-
+        const voiceChannel = member?.voice?.channel;
         const session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+
         if (!session) {
-            // تحديث رسالة التحكم لتفريغ القائمة وإزالة الصح عند انتهاء الجلسة
-            await interaction.message.edit({ components: [] }).catch(() => {});
             return interaction.reply({ content: 'البوت مو برومك', ephemeral: true });
         }
 
         if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
-            await interaction.deferUpdate().catch(() => {});
-            return;
+            return interaction.reply({ content: 'لست صاحب الروم أو ليس لديك صلاحية التحكم!', ephemeral: true });
         }
 
-        // تحديث رسالة التحكم فوراً لكي تختفي علامة الصح وتبقى القائمة جاهزة للاستخدام المتكرر
-        await interaction.update({
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('bot_control_menu')
-                        .setPlaceholder('Choose an order from the list')
-                        .addOptions([
-                            { label: 'رفع الصوت', value: 'volume_control' },
-                            { label: 'تشغيل اغنية', value: 'search_song' },
-                            { label: 'ايقاف الاغنية', value: 'stop_song' },
-                            { label: 'صلاحية', value: 'give_perm' },
-                            { label: 'ازالة صلاحية', value: 'remove_perm' }
-                        ])
-                )
-            ]
-        }).catch(() => {});
+        const customId = interaction.customId;
 
-        if (choice === 'search_song') {
+        if (customId === 'btn_search') {
             const modal = new ModalBuilder()
                 .setCustomId('search_song_modal')
                 .setTitle('البحث عن الاغاني');
@@ -187,7 +208,7 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
-        if (choice === 'stop_song') {
+        if (customId === 'btn_stop') {
             if (session.player) {
                 session.player.stop();
                 const songName = session.currentSong || 'الاغنية';
@@ -195,10 +216,10 @@ client.on('interactionCreate', async interaction => {
                 const tempMsg = await interaction.channel.send({ content: `تم ايقاف الاغنية ${songName}` });
                 setTimeout(() => tempMsg.delete().catch(() => {}), 4000);
             }
-            return;
+            return interaction.reply({ content: 'تم إيقاف الأغنية', ephemeral: true });
         }
 
-        if (choice === 'volume_control') {
+        if (customId === 'btn_vol') {
             const modal = new ModalBuilder()
                 .setCustomId('volume_modal')
                 .setTitle('صوت الاغنية');
@@ -214,7 +235,7 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
-        if (choice === 'give_perm') {
+        if (customId === 'btn_perm') {
             const modal = new ModalBuilder()
                 .setCustomId('perm_modal')
                 .setTitle('اعطاء صلاحية');
@@ -230,7 +251,7 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
-        if (choice === 'remove_perm') {
+        if (customId === 'btn_remove_perm') {
             const modal = new ModalBuilder()
                 .setCustomId('remove_perm_modal')
                 .setTitle('ازالة صلاحية');
@@ -357,7 +378,6 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    // إذا الشخص المستدعي للبوت طلع من الروم، البوت يخرج وراه مباشرة
     if (oldState.channelId && activeSessions.has(oldState.channelId)) {
         const session = activeSessions.get(oldState.channelId);
         if (oldState.member.id === session.ownerId && !newState.channelId) {
@@ -378,7 +398,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
     }
 
-    // إذا البوت نفسه طلع أو انطرد من الروم
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
@@ -386,7 +405,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                     try {
                         const channel = await client.channels.fetch(session.channelId);
                         if (channel) {
-                            const msg = await channel.messages.fetch(session.controlMsgId);
+                            const msg = await channel.messages.fetch(session.channelId);
                             if (msg) await msg.delete().catch(() => {});
                         }
                     } catch (e) {}
