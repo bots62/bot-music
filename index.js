@@ -29,7 +29,6 @@ const client = new Client({
 const PANEL_CHANNEL_ID = '1543145775729746051';
 const activeSessions = new Map();
 
-// قائمة البوتات المتاحة لمنع التصادم مستقبلاً
 const availableBots = [
     { id: client.user?.id || 'main', token: process.env.TOKEN }
 ];
@@ -38,14 +37,13 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
 
-    // نظام التحديث التلقائي لرسائل الأزرار كل 5 دقائق
+    // نظام التحديث التلقائي لرسائل الأزرار في رومات الصوت كل 5 دقائق
     setInterval(async () => {
         for (const [channelId, session] of activeSessions.entries()) {
             try {
                 const channel = await client.channels.fetch(session.channelId).catch(() => null);
                 if (!channel) continue;
 
-                // حذف الرسالة القديمة إن وجدت
                 if (session.controlMsgId) {
                     const oldMsg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
                     if (oldMsg) await oldMsg.delete().catch(() => {});
@@ -66,7 +64,6 @@ client.once('ready', async () => {
                     new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
                 );
 
-                // إعادة إرسال الرسالة الجديدة فوراً
                 const newMsg = await channel.send({
                     content: `مرحباً بك <@${session.ownerId}>`,
                     embeds: [controlEmbed],
@@ -78,7 +75,7 @@ client.once('ready', async () => {
                 console.error('Error refreshing control message:', err);
             }
         }
-    }, 5 * 60 * 1000); // كل 5 دقائق
+    }, 5 * 60 * 1000);
 });
 
 async function sendOrUpdatePanel() {
@@ -122,6 +119,19 @@ client.on('interactionCreate', async interaction => {
             const choice = interaction.values[0];
             const member = interaction.member;
             const voiceChannel = member.voice.channel;
+
+            // منع إرسال البوت أو تفاعله إذا كان المستخدم في روم اللوحة الأساسية أو روم lader-music
+            if (interaction.channelId === PANEL_CHANNEL_ID || (voiceChannel && voiceChannel.name.toLowerCase().includes('lader-music'))) {
+                await sendOrUpdatePanel();
+                return interaction.update({ components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('music_panel_menu')
+                            .setPlaceholder('Choose an order from the list')
+                            .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                    )
+                ] }).catch(() => {});
+            }
 
             if (choice === 'add_bot') {
                 if (!voiceChannel) {
@@ -168,15 +178,25 @@ client.on('interactionCreate', async interaction => {
                     const guildChannels = await interaction.guild.channels.fetch();
                     
                     if (voiceChannel.parentId) {
-                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText);
+                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText && c.id !== PANEL_CHANNEL_ID && !c.name.toLowerCase().includes('lader-music'));
                     }
                     
                     if (!targetTextChannel) {
-                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText);
+                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText && c.id !== PANEL_CHANNEL_ID && !c.name.toLowerCase().includes('lader-music'));
                     }
 
-                    if (!targetTextChannel) {
-                        targetTextChannel = interaction.channel;
+                    // إذا لم يتم العثور على شات خاص بالروم، نمنع إرساله في روم الأوامر الأساسي ونبحث عن بديل أو نلغي العملية لتجنب روم lader-music
+                    if (!targetTextChannel || targetTextChannel.id === PANEL_CHANNEL_ID || targetTextChannel.name.toLowerCase().includes('lader-music')) {
+                        await sendOrUpdatePanel();
+                        await interaction.update({ components: [
+                            new ActionRowBuilder().addComponents(
+                                new StringSelectMenuBuilder()
+                                    .setCustomId('music_panel_menu')
+                                    .setPlaceholder('Choose an order from the list')
+                                    .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                            )
+                        ] }).catch(() => {});
+                        return interaction.followUp({ content: 'لم يتم العثور على شات كتابي مخصص لهذا الروم الصوتي!', ephemeral: true });
                     }
 
                     const connection = joinVoiceChannel({
