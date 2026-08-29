@@ -124,8 +124,7 @@ client.on('interactionCreate', async interaction => {
             const member = interaction.member;
             let voiceChannel = member?.voice?.channel;
 
-            // محاولة جلب الروم الصوتي عبر الكاش إذا لم يظهر مباشرة
-            if (!voiceChannel && member?.guild) {
+            if (!voiceChannel && interaction.guild) {
                 const guildMember = await interaction.guild.members.fetch(member.id).catch(() => null);
                 voiceChannel = guildMember?.voice?.channel;
             }
@@ -213,7 +212,6 @@ client.on('interactionCreate', async interaction => {
             voiceChannel = guildMember?.voice?.channel;
         }
 
-        // البحث عن الجلسة النشطة حتى لو كان المستخدم في نفس الروم المسجل
         let session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
         if (!session) {
             for (const [chId, sess] of activeSessions.entries()) {
@@ -421,7 +419,7 @@ client.on('interactionCreate', async interaction => {
                 targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
             } else {
                 const fetchedMembers = await interaction.guild.members.fetch({ query: inputVal, limit: 1 }).catch(() => null);
-                targetMember = fetchedMembers?.first() || null;
+                targetMember = fetchedMembers?.first() === targetMember || fetchedMembers?.first() || null;
             }
 
             if (!targetMember) {
@@ -481,5 +479,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
     }
 });
+
+client.process?.on?.('unhandledRejection', error => {});
 
 client.login(process.env.TOKEN);
