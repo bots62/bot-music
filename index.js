@@ -9,7 +9,7 @@ const {
     TextInputBuilder, 
     TextInputStyle 
 } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, getVoiceConnection } = require('@discordjs/voice');
 const play = require('play-dl');
 
 const client = new Client({
@@ -124,7 +124,8 @@ client.on('interactionCreate', async interaction => {
                     allowedUsers: [member.id],
                     volume: 100,
                     currentSong: null,
-                    controlMsgId: controlMsg.id
+                    controlMsgId: controlMsg.id,
+                    channelId: interaction.channel.id
                 });
 
                 return;
@@ -270,12 +271,12 @@ client.on('interactionCreate', async interaction => {
             const vol = parseInt(rawVal);
 
             if (isNaN(vol) || vol < 50) {
-                const tempMsg = await interaction.reply({ content: 'أقل حد للصوت هو 50', ephemeral: true });
+                await interaction.reply({ content: 'أقل حد للصوت هو 50', ephemeral: true });
                 setTimeout(() => interaction.deleteReply().catch(() => {}), 4000);
                 return;
             }
             if (vol > 1000) {
-                const tempMsg = await interaction.reply({ content: 'أعلى حد للصوت هو 1000', ephemeral: true });
+                await interaction.reply({ content: 'أعلى حد للصوت هو 1000', ephemeral: true });
                 setTimeout(() => interaction.deleteReply().catch(() => {}), 4000);
                 return;
             }
@@ -295,7 +296,7 @@ client.on('interactionCreate', async interaction => {
             const targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
 
             if (!targetMember) {
-                const temp = await interaction.reply({ content: 'لم يتم العثور على هذا الشخص!', ephemeral: true });
+                await interaction.reply({ content: 'لم يتم العثور على هذا الشخص!', ephemeral: true });
                 setTimeout(() => interaction.deleteReply().catch(() => {}), 4000);
                 return;
             }
@@ -313,7 +314,7 @@ client.on('interactionCreate', async interaction => {
             const targetId = interaction.fields.getTextInputValue('target_user').replace(/<@!?(\d+)>/, '$1');
             
             if (targetId === session.ownerId) {
-                const temp = await interaction.reply({ content: 'لا يمكنك إزالة الصلاحية من صاحب الروم الأساسي!', ephemeral: true });
+                await interaction.reply({ content: 'لا يمكنك إزالة الصلاحية من صاحب الروم الأساسي!', ephemeral: true });
                 setTimeout(() => interaction.deleteReply().catch(() => {}), 4000);
                 return;
             }
@@ -331,6 +332,19 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
+    // إذا الشخص المستدعي للبوت طلع من الروم، البوت يخرج وراه مباشرة
+    if (oldState.channelId && activeSessions.has(oldState.channelId)) {
+        const session = activeSessions.get(oldState.channelId);
+        if (oldState.member.id === session.ownerId && !newState.channelId) {
+            if (session.connection) {
+                session.connection.destroy();
+            }
+            activeSessions.delete(oldState.channelId);
+            return;
+        }
+    }
+
+    // إذا البوت نفسه طلع أو انطرد من الروم
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         activeSessions.delete(oldState.channelId);
     }
