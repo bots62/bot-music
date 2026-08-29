@@ -37,7 +37,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
 
-    // نظام التحديث التلقائي لرسائل الأزرار في رومات الصوت كل 5 دقائق
+    // التحديث التلقائي لرسائل الأزرار كل 5 دقائق (حذف وإعادة إرسال فورية)
     setInterval(async () => {
         for (const [channelId, session] of activeSessions.entries()) {
             try {
@@ -118,59 +118,35 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId === 'music_panel_menu') {
             const choice = interaction.values[0];
             const member = interaction.member;
-            const voiceChannel = member.voice.channel;
+            const voiceChannel = member?.voice?.channel;
 
-            // منع إرسال البوت أو تفاعله إذا كان المستخدم في روم اللوحة الأساسية أو روم lader-music
+            // إعادة تعيين القائمة بهدوء لكي تظل جاهزة دائماً
+            await interaction.update({ components: [
+                new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('music_panel_menu')
+                        .setPlaceholder('Choose an order from the list')
+                        .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                )
+            ] }).catch(() => {});
+
+            // منع الاستخدام في روم اللوحة أو روم lader-music
             if (interaction.channelId === PANEL_CHANNEL_ID || (voiceChannel && voiceChannel.name.toLowerCase().includes('lader-music'))) {
-                await sendOrUpdatePanel();
-                return interaction.update({ components: [
-                    new ActionRowBuilder().addComponents(
-                        new StringSelectMenuBuilder()
-                            .setCustomId('music_panel_menu')
-                            .setPlaceholder('Choose an order from the list')
-                            .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                    )
-                ] }).catch(() => {});
+                return interaction.followUp({ content: 'أنت لست في رومك الصوتي!', ephemeral: true });
             }
 
             if (choice === 'add_bot') {
                 if (!voiceChannel) {
-                    await sendOrUpdatePanel();
-                    await interaction.update({ components: [
-                        new ActionRowBuilder().addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('music_panel_menu')
-                                .setPlaceholder('Choose an order from the list')
-                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                        )
-                    ] }).catch(() => {});
-                    return interaction.followUp({ content: 'أنت لست في روم صوتي لتتمكن من إضافة البوت!', ephemeral: true });
+                    return interaction.followUp({ content: 'أنت لست في رومك الصوتي!', ephemeral: true });
+                }
+
+                // التحقق هل الروم يحتوي على بوت مضاف مسبقاً
+                if (activeSessions.has(voiceChannel.id)) {
+                    return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
                 }
 
                 if (activeSessions.size >= availableBots.length) {
-                    await sendOrUpdatePanel();
-                    await interaction.update({ components: [
-                        new ActionRowBuilder().addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('music_panel_menu')
-                                .setPlaceholder('Choose an order from the list')
-                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                        )
-                    ] }).catch(() => {});
-                    return interaction.followUp({ content: 'لا توجد بوتات كافية', ephemeral: true });
-                }
-
-                if (activeSessions.has(voiceChannel.id)) {
-                    await sendOrUpdatePanel();
-                    await interaction.update({ components: [
-                        new ActionRowBuilder().addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('music_panel_menu')
-                                .setPlaceholder('Choose an order from the list')
-                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                        )
-                    ] }).catch(() => {});
-                    return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
+                    return interaction.followUp({ content: 'لا توجد بوتات كافية حالياً!', ephemeral: true });
                 }
 
                 try {
@@ -185,17 +161,7 @@ client.on('interactionCreate', async interaction => {
                         targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText && c.id !== PANEL_CHANNEL_ID && !c.name.toLowerCase().includes('lader-music'));
                     }
 
-                    // إذا لم يتم العثور على شات خاص بالروم، نمنع إرساله في روم الأوامر الأساسي ونبحث عن بديل أو نلغي العملية لتجنب روم lader-music
                     if (!targetTextChannel || targetTextChannel.id === PANEL_CHANNEL_ID || targetTextChannel.name.toLowerCase().includes('lader-music')) {
-                        await sendOrUpdatePanel();
-                        await interaction.update({ components: [
-                            new ActionRowBuilder().addComponents(
-                                new StringSelectMenuBuilder()
-                                    .setCustomId('music_panel_menu')
-                                    .setPlaceholder('Choose an order from the list')
-                                    .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                            )
-                        ] }).catch(() => {});
                         return interaction.followUp({ content: 'لم يتم العثور على شات كتابي مخصص لهذا الروم الصوتي!', ephemeral: true });
                     }
 
@@ -243,25 +209,9 @@ client.on('interactionCreate', async interaction => {
                     });
 
                     await sendOrUpdatePanel();
-                    return interaction.update({ components: [
-                        new ActionRowBuilder().addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('music_panel_menu')
-                                .setPlaceholder('Choose an order from the list')
-                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                        )
-                    ] }).catch(() => {});
                 } catch (err) {
                     console.error(err);
                     await sendOrUpdatePanel();
-                    return interaction.update({ components: [
-                        new ActionRowBuilder().addComponents(
-                            new StringSelectMenuBuilder()
-                                .setCustomId('music_panel_menu')
-                                .setPlaceholder('Choose an order from the list')
-                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                        )
-                    ] }).catch(() => {});
                 }
             }
         }
