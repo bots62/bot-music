@@ -120,7 +120,7 @@ client.on('interactionCreate', async interaction => {
             const member = interaction.member;
             const voiceChannel = member?.voice?.channel;
 
-            // إعادة تعيين القائمة بهدوء لكي تظل جاهزة دائماً
+            // إرجاع القائمة لوضعها الطبيعي فوراً
             await interaction.update({ components: [
                 new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -130,14 +130,9 @@ client.on('interactionCreate', async interaction => {
                 )
             ] }).catch(() => {});
 
-            // منع الاستخدام في روم اللوحة أو روم lader-music
-            if (interaction.channelId === PANEL_CHANNEL_ID || (voiceChannel && voiceChannel.name.toLowerCase().includes('lader-music'))) {
-                return interaction.followUp({ content: 'أنت لست في رومك الصوتي!', ephemeral: true });
-            }
-
             if (choice === 'add_bot') {
                 if (!voiceChannel) {
-                    return interaction.followUp({ content: 'أنت لست في رومك الصوتي!', ephemeral: true });
+                    return interaction.followUp({ content: 'أنت لست في روم صوتي!', ephemeral: true });
                 }
 
                 // التحقق هل الروم يحتوي على بوت مضاف مسبقاً
@@ -154,15 +149,15 @@ client.on('interactionCreate', async interaction => {
                     const guildChannels = await interaction.guild.channels.fetch();
                     
                     if (voiceChannel.parentId) {
-                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText && c.id !== PANEL_CHANNEL_ID && !c.name.toLowerCase().includes('lader-music'));
+                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText);
                     }
                     
                     if (!targetTextChannel) {
-                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText && c.id !== PANEL_CHANNEL_ID && !c.name.toLowerCase().includes('lader-music'));
+                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText);
                     }
 
-                    if (!targetTextChannel || targetTextChannel.id === PANEL_CHANNEL_ID || targetTextChannel.name.toLowerCase().includes('lader-music')) {
-                        return interaction.followUp({ content: 'لم يتم العثور على شات كتابي مخصص لهذا الروم الصوتي!', ephemeral: true });
+                    if (!targetTextChannel) {
+                        targetTextChannel = interaction.channel;
                     }
 
                     const connection = joinVoiceChannel({
