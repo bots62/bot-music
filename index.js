@@ -37,6 +37,48 @@ const availableBots = [
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
+
+    // نظام التحديث التلقائي لرسائل الأزرار كل 5 دقائق
+    setInterval(async () => {
+        for (const [channelId, session] of activeSessions.entries()) {
+            try {
+                const channel = await client.channels.fetch(session.channelId).catch(() => null);
+                if (!channel) continue;
+
+                // حذف الرسالة القديمة إن وجدت
+                if (session.controlMsgId) {
+                    const oldMsg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
+                    if (oldMsg) await oldMsg.delete().catch(() => {});
+                }
+
+                const controlEmbed = new EmbedBuilder()
+                    .setColor('#2b2d31')
+                    .setDescription('تحكم ببوت الاغاني من هنا');
+
+                const row1 = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
+                );
+
+                const row2 = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
+                );
+
+                // إعادة إرسال الرسالة الجديدة فوراً
+                const newMsg = await channel.send({
+                    content: `مرحباً بك <@${session.ownerId}>`,
+                    embeds: [controlEmbed],
+                    components: [row1, row2]
+                });
+
+                session.controlMsgId = newMsg.id;
+            } catch (err) {
+                console.error('Error refreshing control message:', err);
+            }
+        }
+    }, 5 * 60 * 1000); // كل 5 دقائق
 });
 
 async function sendOrUpdatePanel() {
@@ -122,7 +164,6 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    // جلب شات الروم الصوتي الخاص (البحث عن شات نصي داخل نفس الفئة أو بنفس اسم الروم الصوتي)
                     let targetTextChannel = null;
                     const guildChannels = await interaction.guild.channels.fetch();
                     
@@ -134,7 +175,6 @@ client.on('interactionCreate', async interaction => {
                         targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText);
                     }
 
-                    // إذا لم يتم العثور على شات خاص بالروم، سيتم استخدام الشات الحالي الذي كتب فيه الأمر كبديل احتياطي
                     if (!targetTextChannel) {
                         targetTextChannel = interaction.channel;
                     }
@@ -165,7 +205,6 @@ client.on('interactionCreate', async interaction => {
                         new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
                     );
 
-                    // إرسال رسالة الأزرار مباشرة في شات الروم الصوتي المخصص
                     const controlMsg = await targetTextChannel.send({
                         content: `مرحباً بك <@${member.id}>`,
                         embeds: [controlEmbed],
@@ -392,6 +431,26 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
+    for (const [channelId, session] of activeSessions.entries()) {
+        if (oldState.member && oldState.member.id === session.ownerId && oldState.channelId === channelId && newState.channelId !== channelId) {
+            try {
+                if (session.connection) {
+                    session.connection.destroy();
+                }
+                if (session.controlMsgId) {
+                    const channel = await client.channels.fetch(session.channelId).catch(() => null);
+                    if (channel) {
+                        const msg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
+                        if (msg) await msg.delete().catch(() => {});
+                    }
+                }
+            } catch (e) {
+                console.error('Error removing bot on owner leave:', e);
+            }
+            activeSessions.delete(channelId);
+        }
+    }
+
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
