@@ -110,7 +110,6 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    // استخدام شات الروم الصوتي حصرياً (Voice Channel text chat)
                     let targetTextChannel = voiceChannel;
 
                     const controlEmbed = new EmbedBuilder()
@@ -182,7 +181,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (!session) {
-            return interaction.reply({ content: 'البوت مو موجود في رومك !', ephemeral: true });
+            return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
         }
 
         if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
@@ -213,7 +212,7 @@ client.on('interactionCreate', async interaction => {
                 session.currentSong = null;
                 session.currentSongData = null;
             }
-            return interaction.reply({ content: `Playback stopped by <@${member.id}>`, ephemeral: false });
+            return interaction.reply({ content: `Playback stopped by <@${member.id}>`, ephemeral: true });
         }
 
         if (customId === 'btn_pause_resume') {
@@ -310,11 +309,6 @@ client.on('interactionCreate', async interaction => {
 
         if (interaction.customId === 'search_song_modal') {
             const query = interaction.fields.getTextInputValue('song_query');
-            
-            // حفظ الأغنية تلقائياً في السجل لو لم تكن موجودة
-            if (!session.savedSongs.includes(query)) {
-                session.savedSongs.push(query);
-            }
 
             await interaction.deferReply({ ephemeral: true });
 
@@ -352,6 +346,39 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية.' });
             }
         }
+    }
+});
+
+// ميزة حفظ الأغنية عبر كتابة الأمر وإعطاء تفاعل صح
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+
+    if (message.content.startsWith('حفظ ')) {
+        const songName = message.content.slice(4).trim();
+        if (!songName) return;
+
+        let voiceChannel = message.member?.voice?.channel;
+        let session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+        
+        if (!session) {
+            for (const [chId, sess] of activeSessions.entries()) {
+                const ch = message.guild.channels.cache.get(chId);
+                if (ch && ch.members.has(message.author.id)) {
+                    session = sess;
+                    break;
+                }
+            }
+        }
+
+        if (!session) {
+            return message.reply({ content: 'يجب أن يكون البوت مضافاً في رومك الصوتي لتتمكن من حفظ الأغاني.', ephemeral: true }).catch(() => {});
+        }
+
+        if (!session.savedSongs.includes(songName)) {
+            session.savedSongs.push(songName);
+        }
+
+        await message.react('✅').catch(() => {});
     }
 });
 
