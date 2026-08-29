@@ -9,7 +9,8 @@ const {
     StringSelectMenuBuilder, 
     ModalBuilder, 
     TextInputBuilder, 
-    TextInputStyle 
+    TextInputStyle,
+    ChannelType 
 } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
 const play = require('play-dl');
@@ -26,9 +27,12 @@ const client = new Client({
 });
 
 const PANEL_CHANNEL_ID = '1543145775729746051';
-const TARGET_VOICE_CHANNEL_ID = '1536689417136119888'; // الروم الصوتي المطلوب
-const TARGET_TEXT_CHANNEL_ID = '1535491760627646524';  // الشات المخصص للتحكم
 const activeSessions = new Map();
+
+// قائمة البوتات المتاحة لمنع التصادم مستقبلاً
+const availableBots = [
+    { id: client.user?.id || 'main', token: process.env.TOKEN }
+];
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
@@ -78,8 +82,7 @@ client.on('interactionCreate', async interaction => {
             const voiceChannel = member.voice.channel;
 
             if (choice === 'add_bot') {
-                // التحقق هل هو في الروم الصوتي المحدد بدقة
-                if (!voiceChannel || voiceChannel.id !== TARGET_VOICE_CHANNEL_ID) {
+                if (!voiceChannel) {
                     await sendOrUpdatePanel();
                     await interaction.update({ components: [
                         new ActionRowBuilder().addComponents(
@@ -89,7 +92,20 @@ client.on('interactionCreate', async interaction => {
                                 .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
                         )
                     ] }).catch(() => {});
-                    return interaction.followUp({ content: 'أنت لست في الروم الصوتي المخصص لإضافة البوت!', ephemeral: true });
+                    return interaction.followUp({ content: 'أنت لست في روم صوتي لتتمكن من إضافة البوت!', ephemeral: true });
+                }
+
+                if (activeSessions.size >= availableBots.length) {
+                    await sendOrUpdatePanel();
+                    await interaction.update({ components: [
+                        new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder()
+                                .setCustomId('music_panel_menu')
+                                .setPlaceholder('Choose an order from the list')
+                                .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
+                        )
+                    ] }).catch(() => {});
+                    return interaction.followUp({ content: 'لا توجد بوتات كافية', ephemeral: true });
                 }
 
                 if (activeSessions.has(voiceChannel.id)) {
@@ -102,10 +118,27 @@ client.on('interactionCreate', async interaction => {
                                 .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
                         )
                     ] }).catch(() => {});
-                    return interaction.followUp({ content: 'هذا الروم فيه بوت مضاف مسبقاً!', ephemeral: true });
+                    return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
                 }
 
                 try {
+                    // جلب شات الروم الصوتي الخاص (البحث عن شات نصي داخل نفس الفئة أو بنفس اسم الروم الصوتي)
+                    let targetTextChannel = null;
+                    const guildChannels = await interaction.guild.channels.fetch();
+                    
+                    if (voiceChannel.parentId) {
+                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText);
+                    }
+                    
+                    if (!targetTextChannel) {
+                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText);
+                    }
+
+                    // إذا لم يتم العثور على شات خاص بالروم، سيتم استخدام الشات الحالي الذي كتب فيه الأمر كبديل احتياطي
+                    if (!targetTextChannel) {
+                        targetTextChannel = interaction.channel;
+                    }
+
                     const connection = joinVoiceChannel({
                         channelId: voiceChannel.id,
                         guildId: voiceChannel.guild.id,
@@ -132,9 +165,7 @@ client.on('interactionCreate', async interaction => {
                         new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
                     );
 
-                    // جلب الشات المخصص المذكور
-                    const targetTextChannel = await interaction.guild.channels.fetch(TARGET_TEXT_CHANNEL_ID).catch(() => interaction.channel);
-
+                    // إرسال رسالة الأزرار مباشرة في شات الروم الصوتي المخصص
                     const controlMsg = await targetTextChannel.send({
                         content: `مرحباً بك <@${member.id}>`,
                         embeds: [controlEmbed],
@@ -187,7 +218,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
-            return interaction.reply({ content: 'ليس لديك صلاحية للتحكم بالبوت!', ephemeral: true });
+            return interaction.reply({ content: 'ليس لديك صلاحية', ephemeral: true });
         }
 
         const customId = interaction.customId;
@@ -274,6 +305,10 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
         }
 
+        if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
+            return interaction.reply({ content: 'ليس لديك صلاحية', ephemeral: true });
+        }
+
         if (interaction.customId === 'search_song_modal') {
             const query = interaction.fields.getTextInputValue('song_query');
             await interaction.deferReply({ ephemeral: true });
@@ -357,7 +392,6 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    // إزالة الجلسة في حال تم إخراج البوت من الروم الصوتي نفسه
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
