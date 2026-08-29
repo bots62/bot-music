@@ -122,7 +122,13 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId === 'music_panel_menu') {
             const choice = interaction.values[0];
             const member = interaction.member;
-            const voiceChannel = member?.voice?.channel;
+            let voiceChannel = member?.voice?.channel;
+
+            // محاولة جلب الروم الصوتي عبر الكاش إذا لم يظهر مباشرة
+            if (!voiceChannel && member?.guild) {
+                const guildMember = await interaction.guild.members.fetch(member.id).catch(() => null);
+                voiceChannel = guildMember?.voice?.channel;
+            }
 
             await interaction.update({ components: [
                 new ActionRowBuilder().addComponents(
@@ -142,10 +148,6 @@ client.on('interactionCreate', async interaction => {
                     return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
                 }
 
-                if (activeSessions.size >= availableBots.length) {
-                    return interaction.followUp({ content: 'لا توجد بوتات كافية حالياً!', ephemeral: true });
-                }
-
                 try {
                     const connection = joinVoiceChannel({
                         channelId: voiceChannel.id,
@@ -158,7 +160,7 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    let targetTextChannel = voiceChannel;
+                    let targetTextChannel = interaction.channel;
                     
                     const controlEmbed = new EmbedBuilder()
                         .setColor('#2b2d31')
@@ -178,11 +180,6 @@ client.on('interactionCreate', async interaction => {
                     const controlMsg = await targetTextChannel.send({
                         embeds: [controlEmbed],
                         components: [row1, row2]
-                    }).catch(async () => {
-                        return await interaction.channel.send({
-                            embeds: [controlEmbed],
-                            components: [row1, row2]
-                        });
                     });
 
                     const refreshInterval = await setupControlRefresh(voiceChannel.id);
@@ -209,8 +206,24 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isButton()) {
         const member = interaction.member;
-        const voiceChannel = member?.voice?.channel;
-        const session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+        let voiceChannel = member?.voice?.channel;
+
+        if (!voiceChannel && interaction.guild) {
+            const guildMember = await interaction.guild.members.fetch(member.id).catch(() => null);
+            voiceChannel = guildMember?.voice?.channel;
+        }
+
+        // البحث عن الجلسة النشطة حتى لو كان المستخدم في نفس الروم المسجل
+        let session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+        if (!session) {
+            for (const [chId, sess] of activeSessions.entries()) {
+                const ch = interaction.guild.channels.cache.get(chId);
+                if (ch && ch.members.has(member.id)) {
+                    session = sess;
+                    break;
+                }
+            }
+        }
 
         if (!session) {
             return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
@@ -297,8 +310,23 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isModalSubmit()) {
         const member = interaction.member;
-        const voiceChannel = member?.voice?.channel;
-        const session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+        let voiceChannel = member?.voice?.channel;
+
+        if (!voiceChannel && interaction.guild) {
+            const guildMember = await interaction.guild.members.fetch(member.id).catch(() => null);
+            voiceChannel = guildMember?.voice?.channel;
+        }
+
+        let session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
+        if (!session) {
+            for (const [chId, sess] of activeSessions.entries()) {
+                const ch = interaction.guild.channels.cache.get(chId);
+                if (ch && ch.members.has(member.id)) {
+                    session = sess;
+                    break;
+                }
+            }
+        }
 
         if (!session) {
             return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
@@ -315,7 +343,6 @@ client.on('interactionCreate', async interaction => {
             try {
                 let songUrl = query;
                 
-                // إذا لم يكن رابطاً مباشراً، نقوم بالبحث الذكي والجزئي (سواء كلمة أو كلمتين)
                 if (!query.startsWith('http://') && !query.startsWith('https://')) {
                     const searchResults = await play.search(query, { limit: 1 });
                     if (!searchResults || searchResults.length === 0) {
