@@ -28,10 +28,6 @@ const client = new Client({
 const PANEL_CHANNEL_ID = '1543145775729746051';
 const activeSessions = new Map();
 
-const availableBots = [
-    { id: client.user?.id || 'main', token: process.env.TOKEN }
-];
-
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
@@ -70,51 +66,6 @@ async function sendOrUpdatePanel() {
     } catch (err) {
         console.error('Error sending panel:', err);
     }
-}
-
-async function setupControlRefresh(voiceChannelId) {
-    const interval = setInterval(async () => {
-        const session = activeSessions.get(voiceChannelId);
-        if (!session) {
-            return clearInterval(interval);
-        }
-
-        try {
-            const channel = await client.channels.fetch(session.channelId).catch(() => null);
-            if (!channel) return;
-
-            if (session.controlMsgId) {
-                const oldMsg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
-                if (oldMsg) await oldMsg.delete().catch(() => {});
-            }
-
-            const controlEmbed = new EmbedBuilder()
-                .setColor('#2b2d31')
-                .setDescription('تحكم ببوت الاغاني من هنا');
-
-            const row1 = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
-            );
-
-            const row2 = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
-            );
-
-            const newMsg = await channel.send({
-                embeds: [controlEmbed],
-                components: [row1, row2]
-            });
-
-            session.controlMsgId = newMsg.id;
-        } catch (e) {
-            console.error('Error refreshing control message:', e);
-        }
-    }, 5 * 60 * 1000);
-
-    return interval;
 }
 
 client.on('interactionCreate', async interaction => {
@@ -159,29 +110,31 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    let targetTextChannel = interaction.channel;
-                    
+                    // استخدام شات الروم الصوتي حصرياً (Voice Channel text chat)
+                    let targetTextChannel = voiceChannel;
+
                     const controlEmbed = new EmbedBuilder()
-                        .setColor('#2b2d31')
-                        .setDescription('تحكم ببوت الاغاني من هنا');
+                        .setColor('#18191c')
+                        .setDescription('**Now Playing**\n\nابحث عن أغنية للبدء...');
 
                     const row1 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_vol_down').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_pause_resume').setEmoji('⏯️').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_vol_up').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary)
                     );
 
                     const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_search').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary)
                     );
 
                     const controlMsg = await targetTextChannel.send({
                         embeds: [controlEmbed],
                         components: [row1, row2]
                     });
-
-                    const refreshInterval = await setupControlRefresh(voiceChannel.id);
 
                     activeSessions.set(voiceChannel.id, {
                         connection,
@@ -190,9 +143,14 @@ client.on('interactionCreate', async interaction => {
                         allowedUsers: [member.id],
                         volume: 100,
                         currentSong: null,
+                        currentSongData: null,
+                        savedSongs: [],
+                        savedIndex: 0,
+                        isPaused: false,
+                        loop: false,
+                        shuffle: false,
                         controlMsgId: controlMsg.id,
-                        channelId: targetTextChannel.id,
-                        refreshInterval
+                        channelId: targetTextChannel.id
                     });
 
                     await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
@@ -224,7 +182,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (!session) {
-            return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
+            return interaction.reply({ content: 'البوت مو موجود في رومك !', ephemeral: true });
         }
 
         if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
@@ -242,7 +200,7 @@ client.on('interactionCreate', async interaction => {
                 .setCustomId('song_query')
                 .setLabel('اكتب اسم الاغنية')
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('اكتب اسم اغنيه مثال شوفك شفا')
+                .setPlaceholder('مثال: شوفك شفا أريام')
                 .setRequired(true);
 
             modal.addComponents(new ActionRowBuilder().addComponents(songInput));
@@ -253,56 +211,78 @@ client.on('interactionCreate', async interaction => {
             if (session.player) {
                 session.player.stop();
                 session.currentSong = null;
+                session.currentSongData = null;
             }
-            return interaction.reply({ content: 'تم ايقاف الاغنية', ephemeral: true });
+            return interaction.reply({ content: `Playback stopped by <@${member.id}>`, ephemeral: false });
         }
 
-        if (customId === 'btn_vol') {
-            const modal = new ModalBuilder()
-                .setCustomId('volume_modal')
-                .setTitle('رفع الصوت');
-
-            const volInput = new TextInputBuilder()
-                .setCustomId('volume_value')
-                .setLabel('اكتب صوت الاغنية مثال v50 v1000')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('مثال: v400')
-                .setRequired(true);
-
-            modal.addComponents(new ActionRowBuilder().addComponents(volInput));
-            return await interaction.showModal(modal);
+        if (customId === 'btn_pause_resume') {
+            if (!session.player) return interaction.reply({ content: 'لا توجد أغنية مشغلة حالياً', ephemeral: true });
+            if (session.isPaused) {
+                session.player.unpause();
+                session.isPaused = false;
+                return interaction.reply({ content: 'تم استئناف الأغنية', ephemeral: true });
+            } else {
+                session.player.pause();
+                session.isPaused = true;
+                return interaction.reply({ content: 'تم إيقاف الأغنية مؤقتاً', ephemeral: true });
+            }
         }
 
-        if (customId === 'btn_perm') {
-            const modal = new ModalBuilder()
-                .setCustomId('perm_modal')
-                .setTitle('صلاحية');
-
-            const userInput = new TextInputBuilder()
-                .setCustomId('target_user')
-                .setLabel('اختار لمن تعطيه صلاحية')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('اكتب يوزر الذي تريد اعطائه صلاحية مثال softrayn')
-                .setRequired(true);
-
-            modal.addComponents(new ActionRowBuilder().addComponents(userInput));
-            return await interaction.showModal(modal);
+        if (customId === 'btn_vol_down') {
+            let newVol = session.volume - 25;
+            if (newVol < 50) newVol = 50;
+            session.volume = newVol;
+            if (session.player && session.player.state.resource && session.player.state.resource.volume) {
+                session.player.state.resource.volume.setVolume(newVol / 100);
+            }
+            return interaction.reply({ content: `تم خفض الصوت إلى V${newVol}`, ephemeral: true });
         }
 
-        if (customId === 'btn_remove_perm') {
-            const modal = new ModalBuilder()
-                .setCustomId('remove_perm_modal')
-                .setTitle('ازالة صلاحية');
+        if (customId === 'btn_vol_up') {
+            let newVol = session.volume + 25;
+            if (newVol > 1000) newVol = 1000;
+            session.volume = newVol;
+            if (session.player && session.player.state.resource && session.player.state.resource.volume) {
+                session.player.state.resource.volume.setVolume(newVol / 100);
+            }
+            return interaction.reply({ content: `تم رفع الصوت إلى V${newVol}`, ephemeral: true });
+        }
 
-            const userInput = new TextInputBuilder()
-                .setCustomId('target_user')
-                .setLabel('اختار شخص لازالة صلاحيتة')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('زيل صلاحية شخص مثال softrayn')
-                .setRequired(true);
+        if (customId === 'btn_loop') {
+            session.loop = !session.loop;
+            return interaction.reply({ content: `حالة التكرار (Loop): ${session.loop ? 'ON' : 'OFF'}`, ephemeral: true });
+        }
 
-            modal.addComponents(new ActionRowBuilder().addComponents(userInput));
-            return await interaction.showModal(modal);
+        if (session.savedSongs.length === 0) {
+            return interaction.reply({ content: 'أنت مو حافظ أغاني. اكتب اسم الأغنية أو احفظها أولاً.', ephemeral: true });
+        }
+
+        if (customId === 'btn_next' || customId === 'btn_shuffle') {
+            session.savedIndex = (session.savedIndex + 1) % session.savedSongs.length;
+            const songToPlay = session.savedSongs[session.savedIndex];
+            
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                const searchResults = await play.search(songToPlay, { limit: 1 });
+                if (!searchResults || searchResults.length === 0) {
+                    return interaction.editReply({ content: 'لم يتم العثور على الأغنية المحفوظة.' });
+                }
+                const track = searchResults[0];
+                session.currentSongData = track;
+
+                const streamData = await play.stream(track.url);
+                const resource = createAudioResource(streamData.stream, {
+                    inputType: streamData.type,
+                    inlineVolume: true
+                });
+                resource.volume.setVolume(session.volume / 100);
+                session.player.play(resource);
+
+                await interaction.editReply({ content: `تم التبديل إلى: ${track.title}` });
+            } catch (e) {
+                console.error(e);
+            }
         }
     }
 
@@ -326,116 +306,50 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        if (!session) {
-            return interaction.reply({ content: 'البوت ليس موجوداً في رومك الصوتي!', ephemeral: true });
-        }
-
-        if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
-            return interaction.reply({ content: 'ما معك صلاحية', ephemeral: true });
-        }
+        if (!session) return;
 
         if (interaction.customId === 'search_song_modal') {
             const query = interaction.fields.getTextInputValue('song_query');
+            
+            // حفظ الأغنية تلقائياً في السجل لو لم تكن موجودة
+            if (!session.savedSongs.includes(query)) {
+                session.savedSongs.push(query);
+            }
+
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                let songUrl = query;
-                
-                if (!query.startsWith('http://') && !query.startsWith('https://')) {
-                    const searchResults = await play.search(query, { limit: 1 });
-                    if (!searchResults || searchResults.length === 0) {
-                        return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
-                    }
-                    songUrl = searchResults[0].url;
-                    session.currentSong = searchResults[0].title;
-                } else {
-                    session.currentSong = query;
+                const searchResults = await play.search(query, { limit: 1 });
+                if (!searchResults || searchResults.length === 0) {
+                    return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
                 }
+                const track = searchResults[0];
+                session.currentSongData = track;
 
-                const streamData = await play.stream(songUrl);
+                const streamData = await play.stream(track.url);
                 const resource = createAudioResource(streamData.stream, {
                     inputType: streamData.type,
                     inlineVolume: true
                 });
 
-                const volMultiplier = session.volume / 100;
-                resource.volume.setVolume(volMultiplier);
-
+                resource.volume.setVolume(session.volume / 100);
                 session.player.play(resource);
+
+                const embed = new EmbedBuilder()
+                    .setColor('#18191c')
+                    .setTitle('Now Playing')
+                    .setDescription(`**${track.title}**\nby <@${member.id}>\n\nDuration: ${track.duration}\nPlatform: YouTube`)
+                    .setThumbnail(track.thumbnail);
+
+                const channel = await client.channels.fetch(session.channelId).catch(() => null);
+                if (channel) {
+                    await channel.send({ embeds: [embed] }).catch(() => {});
+                }
 
                 await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح!' });
             } catch (err) {
                 console.error(err);
-                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية، تأكد من اسم الأغنية أو الرابط.' });
-            }
-        }
-
-        if (interaction.customId === 'volume_modal') {
-            const rawVal = interaction.fields.getTextInputValue('volume_value').toLowerCase().replace('v', '').trim();
-            const vol = parseInt(rawVal);
-
-            if (isNaN(vol) || vol < 50 || vol > 1000) {
-                return interaction.reply({ content: 'أعلى حد v1000 اقل حد v50', ephemeral: true });
-            }
-
-            session.volume = vol;
-            if (session.player && session.player.state.resource && session.player.state.resource.volume) {
-                session.player.state.resource.volume.setVolume(vol / 100);
-            }
-
-            const multiplierText = (vol / 100).toFixed(2).replace('.', ',');
-            return interaction.reply({ content: `تم اختيار الصوت v${vol} (ضعف الصوت الطبيعي ${multiplierText} مرة)`, ephemeral: true });
-        }
-
-        if (interaction.customId === 'perm_modal') {
-            const inputVal = interaction.fields.getTextInputValue('target_user').trim();
-            let targetMember = null;
-
-            if (inputVal.startsWith('<@') && inputVal.endsWith('>')) {
-                const targetId = inputVal.replace(/<@!?(\d+)>/, '$1');
-                targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
-            } else {
-                const fetchedMembers = await interaction.guild.members.fetch({ query: inputVal, limit: 1 }).catch(() => null);
-                targetMember = fetchedMembers?.first() || null;
-            }
-
-            if (!targetMember) {
-                return interaction.reply({ content: 'لم يتم العثور على هذا الشخص!', ephemeral: true });
-            }
-
-            if (!session.allowedUsers.includes(targetMember.id)) {
-                session.allowedUsers.push(targetMember.id);
-            }
-
-            return interaction.reply({ content: `تم إعطاء صلاحية التحكم لـ <@${targetMember.id}>`, ephemeral: true });
-        }
-
-        if (interaction.customId === 'remove_perm_modal') {
-            const inputVal = interaction.fields.getTextInputValue('target_user').trim();
-            let targetMember = null;
-
-            if (inputVal.startsWith('<@') && inputVal.endsWith('>')) {
-                const targetId = inputVal.replace(/<@!?(\d+)>/, '$1');
-                targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
-            } else {
-                const fetchedMembers = await interaction.guild.members.fetch({ query: inputVal, limit: 1 }).catch(() => null);
-                targetMember = fetchedMembers?.first() === targetMember || fetchedMembers?.first() || null;
-            }
-
-            if (!targetMember) {
-                return interaction.reply({ content: 'لم يتم العثور على هذا الشخص!', ephemeral: true });
-            }
-
-            if (targetMember.id === session.ownerId) {
-                return interaction.reply({ content: 'لا يمكنك إزالة الصلاحية من صاحب الروم الأساسي!', ephemeral: true });
-            }
-
-            const index = session.allowedUsers.indexOf(targetMember.id);
-            if (index > -1) {
-                session.allowedUsers.splice(index, 1);
-                return interaction.reply({ content: `تم ازالة الصلاحية`, ephemeral: true });
-            } else {
-                return interaction.reply({ content: `هذا الشخص لايملك صلاحية`, ephemeral: true });
+                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية.' });
             }
         }
     }
@@ -445,10 +359,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     for (const [channelId, session] of activeSessions.entries()) {
         if (oldState.member && oldState.member.id === session.ownerId && oldState.channelId === channelId && newState.channelId !== channelId) {
             try {
-                if (session.refreshInterval) clearInterval(session.refreshInterval);
-                if (session.connection) {
-                    session.connection.destroy();
-                }
+                if (session.connection) session.connection.destroy();
                 if (session.controlMsgId) {
                     const channel = await client.channels.fetch(session.channelId).catch(() => null);
                     if (channel) {
@@ -460,26 +371,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             activeSessions.delete(channelId);
         }
     }
-
-    if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
-        for (const [channelId, session] of activeSessions.entries()) {
-            if (session.connection === oldState.connection || channelId === oldState.channelId) {
-                if (session.refreshInterval) clearInterval(session.refreshInterval);
-                if (session.controlMsgId) {
-                    try {
-                        const channel = await client.channels.fetch(session.channelId);
-                        if (channel) {
-                            const msg = await channel.messages.fetch(session.controlMsgId);
-                            if (msg) await msg.delete().catch(() => {});
-                        }
-                    } catch (e) {}
-                }
-                activeSessions.delete(channelId);
-            }
-        }
-    }
 });
-
-client.process?.on?.('unhandledRejection', error => {});
 
 client.login(process.env.TOKEN);
