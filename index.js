@@ -43,22 +43,22 @@ async function sendOrUpdatePanel() {
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('music_panel_menu')
-            .setPlaceholder('اختر أمراً من القائمة')
+            .setPlaceholder('اختر امرا من القائمة')
             .addOptions([
                 {
-                    label: 'إضافة البوت',
+                    label: 'اضافة البوت',
                     value: 'add_bot'
                 },
                 {
-                    label: 'البحث عن الأغاني',
+                    label: 'البحث عن الاغاني',
                     value: 'search_song'
                 },
                 {
-                    label: 'إيقاف الأغنية',
+                    label: 'ايقاف الاغنية',
                     value: 'stop_song'
                 },
                 {
-                    label: 'صوت الأغنية',
+                    label: 'صوت الاغنية',
                     value: 'volume_control'
                 },
                 {
@@ -98,15 +98,18 @@ client.on('interactionCreate', async interaction => {
 
         if (choice === 'add_bot') {
             if (!voiceChannel) {
-                return interaction.reply({ content: 'منشن رومك أو ادخل روم صوتية أولاً!', ephemeral: true });
+                await interaction.reply({ content: 'منشن رومك أو ادخل روم صوتية أولاً!', ephemeral: true });
+                return;
             }
 
             if (activeSessions.has(voiceChannel.id)) {
-                return interaction.reply({ content: 'هذا الروم فيه بوت من قبل!', ephemeral: true });
+                await interaction.reply({ content: 'هذا الروم فيه بوت من قبل!', ephemeral: true });
+                return;
             }
 
             if (activeSessions.size >= 10) {
-                return interaction.reply({ content: 'لا يوجد عدد بوتات متوفر، انتظر شوي.', ephemeral: true });
+                await interaction.reply({ content: 'لا يوجد عدد بوتات متوفر، انتظر شوي.', ephemeral: true });
+                return;
             }
 
             try {
@@ -128,10 +131,13 @@ client.on('interactionCreate', async interaction => {
                     currentSong: null
                 });
 
-                return interaction.reply({ content: 'تم إضافة البوت لرومك بنجاح!', ephemeral: true });
+                // تحديث التفاعل بدون رسائل ظاهرة وبدون علامة صح مزعجة لتكرار الضغط
+                await interaction.deferUpdate();
+                return;
             } catch (err) {
                 console.error(err);
-                return interaction.reply({ content: 'حدث خطأ أثناء محاولة دخول الروم.', ephemeral: true });
+                await interaction.reply({ content: 'حدث خطأ أثناء محاولة دخول الروم.', ephemeral: true });
+                return;
             }
         }
 
@@ -143,14 +149,17 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: 'لست صاحب الروم أو ليس لديك صلاحية التحكم!', ephemeral: true });
         }
 
+        // استخدام deferUpdate لكل الخيارات لكي لا يظهر خطأ ولا علامة صح تمنع إعادة الضغط
+        await interaction.deferUpdate();
+
         if (choice === 'search_song') {
             const modal = new ModalBuilder()
                 .setCustomId('search_song_modal')
-                .setTitle('البحث عن الأغاني');
+                .setTitle('البحث عن الاغاني');
 
             const songInput = new TextInputBuilder()
                 .setCustomId('song_query')
-                .setLabel('اكتب اسم الأغنية أو الرابط')
+                .setLabel('اكتب اسم الاغنية أو الرابط')
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('مثال: شوفك شفاي')
                 .setRequired(true);
@@ -164,13 +173,13 @@ client.on('interactionCreate', async interaction => {
                 session.player.stop();
                 session.currentSong = null;
             }
-            return interaction.reply({ content: 'تم إيقاف الأغنية وإسكات البوت.', ephemeral: true });
+            return;
         }
 
         if (choice === 'volume_control') {
             const modal = new ModalBuilder()
                 .setCustomId('volume_modal')
-                .setTitle('صوت الأغنية');
+                .setTitle('صوت الاغنية');
 
             const volInput = new TextInputBuilder()
                 .setCustomId('volume_value')
@@ -216,7 +225,7 @@ client.on('interactionCreate', async interaction => {
             try {
                 const searchResult = await play.search(query, { limit: 1 });
                 if (!searchResult || searchResult.length === 0) {
-                    return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
+                    return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الاغنية.' });
                 }
 
                 const song = searchResult[0];
@@ -232,10 +241,10 @@ client.on('interactionCreate', async interaction => {
                 session.player.play(resource);
                 session.currentSong = song.title;
 
-                await interaction.editReply({ content: `ابحث عن أغاني: ${query}\nتم بدء تشغيل: **${song.title}**` });
+                await interaction.editReply({ content: `ابحث عن اغاني: ${query}\nتم بدء تشغيل: **${song.title}**` });
             } catch (err) {
                 console.error(err);
-                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية.' });
+                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الاغنية.' });
             }
         }
 
@@ -244,10 +253,10 @@ client.on('interactionCreate', async interaction => {
             const vol = parseInt(rawVal);
 
             if (isNaN(vol) || vol < 50) {
-                return interaction.reply({ content: 'أقل حد للصوت V50', ephemeral: true });
+                return interaction.reply({ content: 'اقل حد للصوت V50', ephemeral: true });
             }
             if (vol > 1000) {
-                return interaction.reply({ content: 'أعلى حد للصوت V1000', ephemeral: true });
+                return interaction.reply({ content: 'اعلى حد للصوت V1000', ephemeral: true });
             }
 
             session.volume = vol;
@@ -255,7 +264,7 @@ client.on('interactionCreate', async interaction => {
                 session.player.state.resource.volume.setVolume(vol / 100);
             }
 
-            return interaction.reply({ content: `تم رفع صوت الأغنية إلى V${vol}`, ephemeral: true });
+            return interaction.reply({ content: `تم رفع صوت الاغنية إلى V${vol}`, ephemeral: true });
         }
 
         if (interaction.customId === 'perm_modal') {
