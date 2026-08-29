@@ -36,46 +36,6 @@ const availableBots = [
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     await sendOrUpdatePanel();
-
-    // التحديث التلقائي لرسائل الأزرار كل 5 دقائق (حذف وإعادة إرسال فورية بنفس التنسيق)
-    setInterval(async () => {
-        for (const [channelId, session] of activeSessions.entries()) {
-            try {
-                const channel = await client.channels.fetch(session.channelId).catch(() => null);
-                if (!channel) continue;
-
-                if (session.controlMsgId) {
-                    const oldMsg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
-                    if (oldMsg) await oldMsg.delete().catch(() => {});
-                }
-
-                const controlEmbed = new EmbedBuilder()
-                    .setColor('#2b2d31')
-                    .setDescription('تحكم ببوت الاغاني من هنا');
-
-                const row1 = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
-                );
-
-                const row2 = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
-                );
-
-                const newMsg = await channel.send({
-                    content: `مرحباً بك <@${session.ownerId}>`,
-                    embeds: [controlEmbed],
-                    components: [row1, row2]
-                });
-
-                session.controlMsgId = newMsg.id;
-            } catch (err) {
-                console.error('Error refreshing control message:', err);
-            }
-        }
-    }, 5 * 60 * 1000);
 });
 
 async function sendOrUpdatePanel() {
@@ -135,7 +95,6 @@ client.on('interactionCreate', async interaction => {
                     return interaction.followUp({ content: 'أنت لست في روم صوتي!', ephemeral: true });
                 }
 
-                // التحقق هل الروم يحتوي على بوت مضاف مسبقاً
                 if (activeSessions.has(voiceChannel.id)) {
                     return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
                 }
@@ -145,22 +104,7 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    let targetTextChannel = null;
-                    const guildChannels = await interaction.guild.channels.fetch();
-                    
-                    if (voiceChannel.parentId) {
-                        targetTextChannel = guildChannels.find(c => c && c.parentId === voiceChannel.parentId && c.type === ChannelType.GuildText);
-                    }
-                    
-                    if (!targetTextChannel) {
-                        targetTextChannel = guildChannels.find(c => c && c.name.toLowerCase().includes(voiceChannel.name.toLowerCase()) && c.type === ChannelType.GuildText);
-                    }
-
-                    if (!targetTextChannel) {
-                        targetTextChannel = interaction.channel;
-                    }
-
-                    // حذف رسالة القائمة القديمة من روم اللوحة الأساسي فور إضافة البوت بنجاح
+                    // حذف رسالة اللوحة الأساسية من الروم فوراً لضمان عدم بقائها
                     try {
                         const panelChannel = await client.channels.fetch(PANEL_CHANNEL_ID);
                         if (panelChannel) {
@@ -183,38 +127,17 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    const controlEmbed = new EmbedBuilder()
-                        .setColor('#2b2d31')
-                        .setDescription('تحكم ببوت الاغاني من هنا');
-
-                    const row1 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل اغنية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_stop').setLabel('ايقاف الاغنية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_vol').setLabel('رفع الصوت').setStyle(ButtonStyle.Secondary)
-                    );
-
-                    const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_perm').setLabel('صلاحية').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_remove_perm').setLabel('ازالة صلاحية').setStyle(ButtonStyle.Secondary)
-                    );
-
-                    const controlMsg = await targetTextChannel.send({
-                        content: `مرحباً بك <@${member.id}>`,
-                        embeds: [controlEmbed],
-                        components: [row1, row2]
-                    });
-
+                    // تخزين الجلسة بدون إرسال رسائل أزرار مزعجة في الشات العام
                     activeSessions.set(voiceChannel.id, {
                         connection,
                         player,
                         ownerId: member.id,
                         allowedUsers: [member.id],
                         volume: 100,
-                        currentSong: null,
-                        controlMsgId: controlMsg.id,
-                        channelId: targetTextChannel.id
+                        currentSong: null
                     });
 
+                    await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
                     await sendOrUpdatePanel();
                 } catch (err) {
                     console.error(err);
@@ -414,13 +337,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                 if (session.connection) {
                     session.connection.destroy();
                 }
-                if (session.controlMsgId) {
-                    const channel = await client.channels.fetch(session.channelId).catch(() => null);
-                    if (channel) {
-                        const msg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
-                        if (msg) await msg.delete().catch(() => {});
-                    }
-                }
             } catch (e) {
                 console.error('Error removing bot on owner leave:', e);
             }
@@ -432,15 +348,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
         for (const [channelId, session] of activeSessions.entries()) {
             if (session.connection === oldState.connection || channelId === oldState.channelId) {
-                if (session.controlMsgId) {
-                    try {
-                        const channel = await client.channels.fetch(session.channelId);
-                        if (channel) {
-                            const msg = await channel.messages.fetch(session.controlMsgId);
-                            if (msg) await msg.delete().catch(() => {});
-                        }
-                    } catch (e) {}
-                }
                 activeSessions.delete(channelId);
             }
         }
