@@ -313,18 +313,21 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                let streamData;
-                if (play.yt_validate(query) === 'video') {
-                    streamData = await play.stream(query);
-                } else {
-                    const searchResult = await play.search(query, { limit: 1 });
-                    if (!searchResult || searchResult.length === 0) {
+                let songUrl = query;
+                
+                // إذا لم يكن رابطاً مباشراً، نقوم بالبحث الذكي والجزئي (سواء كلمة أو كلمتين)
+                if (!query.startsWith('http://') && !query.startsWith('https://')) {
+                    const searchResults = await play.search(query, { limit: 1 });
+                    if (!searchResults || searchResults.length === 0) {
                         return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
                     }
-                    streamData = await play.stream(searchResult[0].url);
-                    session.currentSong = searchResult[0].title;
+                    songUrl = searchResults[0].url;
+                    session.currentSong = searchResults[0].title;
+                } else {
+                    session.currentSong = query;
                 }
 
+                const streamData = await play.stream(songUrl);
                 const resource = createAudioResource(streamData.stream, {
                     inputType: streamData.type,
                     inlineVolume: true
@@ -338,12 +341,12 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح!' });
             } catch (err) {
                 console.error(err);
-                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية، تأكد من الرابط أو اسم الأغنية.' });
+                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية، تأكد من اسم الأغنية أو الرابط.' });
             }
         }
 
         if (interaction.customId === 'volume_modal') {
-            const rawVal = interaction.fields.getTextInputValue('volume_value').toLowerCase().replace('v', '');
+            const rawVal = interaction.fields.getTextInputValue('volume_value').toLowerCase().replace('v', '').trim();
             const vol = parseInt(rawVal);
 
             if (isNaN(vol) || vol < 50 || vol > 1000) {
