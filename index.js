@@ -9,7 +9,7 @@ const {
     TextInputBuilder, 
     TextInputStyle 
 } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, getVoiceConnection } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
 const play = require('play-dl');
 
 const client = new Client({
@@ -43,7 +43,7 @@ async function sendOrUpdatePanel() {
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('music_panel_menu')
-            .setPlaceholder('اختر امرا من القائمة')
+            .setPlaceholder('Choose an order from the list')
             .addOptions([
                 {
                     label: 'اضافة بوت الاغاني',
@@ -93,15 +93,13 @@ client.on('interactionCreate', async interaction => {
                 const player = createAudioPlayer();
                 connection.subscribe(player);
 
-                await interaction.deferUpdate();
-
                 const controlEmbed = new EmbedBuilder()
                     .setColor('#2b2d31')
                     .setDescription('تحكم ببوت الاغاني من هنا');
 
                 const controlMenu = new StringSelectMenuBuilder()
                     .setCustomId('bot_control_menu')
-                    .setPlaceholder('اختر امرا من القائمة')
+                    .setPlaceholder('Choose an order from the list')
                     .addOptions([
                         { label: 'رفع الصوت', value: 'volume_control' },
                         { label: 'تشغيل اغنية', value: 'search_song' },
@@ -128,23 +126,50 @@ client.on('interactionCreate', async interaction => {
                     channelId: interaction.channel.id
                 });
 
-                return;
+                // إعادة اللوحة الأساسية وإزالة علامة الصح واختيار القائمة فوراً
+                await sendOrUpdatePanel();
+                return interaction.deferUpdate().catch(() => {});
             } catch (err) {
                 console.error(err);
                 return interaction.reply({ content: 'حدث خطأ أثناء محاولة دخول الروم.', ephemeral: true });
             }
         }
+    }
+
+    if (interaction.customId === 'bot_control_menu') {
+        const choice = interaction.values[0];
+        const member = interaction.member;
+        const voiceChannel = member.voice.channel;
 
         const session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
         if (!session) {
+            // تحديث رسالة التحكم لتفريغ القائمة وإزالة الصح عند انتهاء الجلسة
+            await interaction.message.edit({ components: [] }).catch(() => {});
             return interaction.reply({ content: 'البوت مو برومك', ephemeral: true });
         }
 
         if (session.ownerId !== member.id && !session.allowedUsers.includes(member.id)) {
-            return interaction.reply({ content: 'لست صاحب الروم أو ليس لديك صلاحية التحكم!', ephemeral: true });
+            await interaction.deferUpdate().catch(() => {});
+            return;
         }
 
-        await interaction.deferUpdate();
+        // تحديث رسالة التحكم فوراً لكي تختفي علامة الصح وتبقى القائمة جاهزة للاستخدام المتكرر
+        await interaction.update({
+            components: [
+                new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('bot_control_menu')
+                        .setPlaceholder('Choose an order from the list')
+                        .addOptions([
+                            { label: 'رفع الصوت', value: 'volume_control' },
+                            { label: 'تشغيل اغنية', value: 'search_song' },
+                            { label: 'ايقاف الاغنية', value: 'stop_song' },
+                            { label: 'صلاحية', value: 'give_perm' },
+                            { label: 'ازالة صلاحية', value: 'remove_perm' }
+                        ])
+                )
+            ]
+        }).catch(() => {});
 
         if (choice === 'search_song') {
             const modal = new ModalBuilder()
@@ -331,13 +356,22 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.on('voiceStateUpdate', (oldState, newState) => {
+client.on('voiceStateUpdate', async (oldState, newState) => {
     // إذا الشخص المستدعي للبوت طلع من الروم، البوت يخرج وراه مباشرة
     if (oldState.channelId && activeSessions.has(oldState.channelId)) {
         const session = activeSessions.get(oldState.channelId);
         if (oldState.member.id === session.ownerId && !newState.channelId) {
             if (session.connection) {
                 session.connection.destroy();
+            }
+            if (session.controlMsgId) {
+                try {
+                    const channel = await client.channels.fetch(session.channelId);
+                    if (channel) {
+                        const msg = await channel.messages.fetch(session.controlMsgId);
+                        if (msg) await msg.delete().catch(() => {});
+                    }
+                } catch (e) {}
             }
             activeSessions.delete(oldState.channelId);
             return;
@@ -346,7 +380,20 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
     // إذا البوت نفسه طلع أو انطرد من الروم
     if (oldState.member && oldState.member.id === client.user.id && oldState.channelId && !newState.channelId) {
-        activeSessions.delete(oldState.channelId);
+        for (const [channelId, session] of activeSessions.entries()) {
+            if (session.connection === oldState.connection || channelId === oldState.channelId) {
+                if (session.controlMsgId) {
+                    try {
+                        const channel = await client.channels.fetch(session.channelId);
+                        if (channel) {
+                            const msg = await channel.messages.fetch(session.controlMsgId);
+                            if (msg) await msg.delete().catch(() => {});
+                        }
+                    } catch (e) {}
+                }
+                activeSessions.delete(channelId);
+            }
+        }
     }
 });
 
