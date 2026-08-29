@@ -80,15 +80,8 @@ client.on('interactionCreate', async interaction => {
             const member = interaction.member;
             const voiceChannel = member?.voice?.channel;
 
-            // إرجاع القائمة لوضعها الطبيعي فوراً دون حذف اللوحة
-            await interaction.update({ components: [
-                new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('music_panel_menu')
-                        .setPlaceholder('Choose an order from the list')
-                        .addOptions([{ label: 'اضافة بوت الاغاني', value: 'add_bot' }])
-                )
-            ] }).catch(() => {});
+            // الرد الفوري لمنع خطأ الـ Timeout
+            await interaction.deferUpdate().catch(() => {});
 
             if (choice === 'add_bot') {
                 if (!voiceChannel) {
@@ -115,8 +108,7 @@ client.on('interactionCreate', async interaction => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    // إرسال رسالة الأزرار بالخلفية السوداء في شات الروم الصوتي أو الشات المرتبط به
-                    let targetTextChannel = voiceChannel; // شات الروم الصوتي نفسه
+                    let targetTextChannel = voiceChannel;
                     
                     const controlEmbed = new EmbedBuilder()
                         .setColor('#2b2d31')
@@ -134,13 +126,10 @@ client.on('interactionCreate', async interaction => {
                     );
 
                     const controlMsg = await targetTextChannel.send({
-                        content: `مرحباً بك <@${member.id}>`,
                         embeds: [controlEmbed],
                         components: [row1, row2]
                     }).catch(async () => {
-                        // لو الروم الصوتي ما يدعم الشات المباشر، يرسلها في الشات العام الحالي
                         return await interaction.channel.send({
-                            content: `مرحباً بك <@${member.id}>`,
                             embeds: [controlEmbed],
                             components: [row1, row2]
                         });
@@ -157,6 +146,7 @@ client.on('interactionCreate', async interaction => {
                         channelId: targetTextChannel.id
                     });
 
+                    await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
                 } catch (err) {
                     console.error(err);
                 }
