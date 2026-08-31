@@ -114,27 +114,34 @@ client.on('interactionCreate', async interaction => {
 
                     const controlEmbed = new EmbedBuilder()
                         .setColor('#18191c')
-                        .setDescription('**Now Playing**\n\nابحث عن أغنية للبدء...');
+                        .setDescription('**تحكم ببوت الأغاني من هنا**');
 
-                    // الأزرار الأولية للتحكم الشامل
+                    // الصف الأول: تشغيل أغنية، إيقاف/استئناف، إيقاف نهائي
                     const row1 = new ActionRowBuilder().addComponents(
                         new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل أغنية').setStyle(ButtonStyle.Primary),
                         new ButtonBuilder().setCustomId('btn_pause_resume').setLabel('إيقاف/استئناف').setStyle(ButtonStyle.Secondary),
                         new ButtonBuilder().setCustomId('btn_stop').setLabel('إيقاف نهائي').setStyle(ButtonStyle.Danger)
                     );
 
+                    // الصف الثاني: صلاحية، إزالة صلاحية
                     const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_vol_down').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_vol_up').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_allow').setLabel('صلاحية').setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId('btn_disallow').setLabel('إزالة صلاحية').setStyle(ButtonStyle.Secondary)
                     );
 
                     const controlMsg = await targetTextChannel.send({
                         embeds: [controlEmbed],
                         components: [row1, row2]
                     });
+
+                    // حذف رسالة التحكم تلقائياً بعد 5 دقائق
+                    setTimeout(async () => {
+                        try {
+                            if (activeSessions.has(voiceChannel.id)) {
+                                await controlMsg.delete().catch(() => {});
+                            }
+                        } catch (e) {}
+                    }, 5 * 60 * 1000);
 
                     activeSessions.set(voiceChannel.id, {
                         connection,
@@ -147,8 +154,6 @@ client.on('interactionCreate', async interaction => {
                         savedSongs: [],
                         savedIndex: 0,
                         isPaused: false,
-                        loop: false,
-                        shuffle: false,
                         controlMsgId: controlMsg.id,
                         channelId: targetTextChannel.id
                     });
@@ -213,7 +218,11 @@ client.on('interactionCreate', async interaction => {
                 session.currentSong = null;
                 session.currentSongData = null;
             }
-            return interaction.reply({ content: `Playback stopped by <@${member.id}>`, ephemeral: true });
+            if (session.connection) {
+                session.connection.destroy();
+            }
+            activeSessions.delete(voiceChannel?.id);
+            return interaction.reply({ content: `تم إيقاف البوت وإخراجه بواسطة <@${member.id}>`, ephemeral: true });
         }
 
         if (customId === 'btn_pause_resume') {
@@ -229,60 +238,12 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        if (customId === 'btn_vol_down') {
-            let newVol = session.volume - 25;
-            if (newVol < 50) newVol = 50;
-            session.volume = newVol;
-            if (session.player && session.player.state.resource && session.player.state.resource.volume) {
-                session.player.state.resource.volume.setVolume(newVol / 100);
-            }
-            return interaction.reply({ content: `تم خفض الصوت إلى V${newVol}`, ephemeral: true });
+        if (customId === 'btn_allow') {
+            return interaction.reply({ content: 'منشن العضو لإعطائه الصلاحية أو استخدم نظام الصلاحيات المخصص.', ephemeral: true });
         }
 
-        if (customId === 'btn_vol_up') {
-            let newVol = session.volume + 25;
-            if (newVol > 1000) newVol = 1000;
-            session.volume = newVol;
-            if (session.player && session.player.state.resource && session.player.state.resource.volume) {
-                session.player.state.resource.volume.setVolume(newVol / 100);
-            }
-            return interaction.reply({ content: `تم رفع الصوت إلى V${newVol}`, ephemeral: true });
-        }
-
-        if (customId === 'btn_loop') {
-            session.loop = !session.loop;
-            return interaction.reply({ content: `حالة التكرار (Loop): ${session.loop ? 'ON' : 'OFF'}`, ephemeral: true });
-        }
-
-        if (session.savedSongs.length === 0) {
-            return interaction.reply({ content: 'أنت مو حافظ أغاني. اكتب اسم الأغنية أو احفظها أولاً.', ephemeral: true });
-        }
-
-        if (customId === 'btn_next' || customId === 'btn_shuffle') {
-            session.savedIndex = (session.savedIndex + 1) % session.savedSongs.length;
-            const songToPlay = session.savedSongs[session.savedIndex];
-            
-            try {
-                await interaction.deferReply({ ephemeral: true });
-                const searchResults = await play.search(songToPlay, { limit: 1 });
-                if (!searchResults || searchResults.length === 0) {
-                    return interaction.editReply({ content: 'لم يتم العثور على الأغنية المحفوظة.' });
-                }
-                const track = searchResults[0];
-                session.currentSongData = track;
-
-                const streamData = await play.stream(track.url);
-                const resource = createAudioResource(streamData.stream, {
-                    inputType: streamData.type,
-                    inlineVolume: true
-                });
-                resource.volume.setVolume(session.volume / 100);
-                session.player.play(resource);
-
-                await interaction.editReply({ content: `تم التبديل إلى: ${track.title}` });
-            } catch (e) {
-                console.error(e);
-            }
+        if (customId === 'btn_disallow') {
+            return interaction.reply({ content: 'تم إزالة الصلاحية.', ephemeral: true });
         }
     }
 
@@ -314,6 +275,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
+                // البحث عبر play-dl وجلب النمط الصحيح للبث
                 const searchResults = await play.search(query, { limit: 1 });
                 if (!searchResults || searchResults.length === 0) {
                     return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
@@ -338,53 +300,26 @@ client.on('interactionCreate', async interaction => {
 
                 const channel = await client.channels.fetch(session.channelId).catch(() => null);
                 if (channel) {
-                    // رسالة تفاصيل الأغنية وقائمتها المخفية/الخاصة تظهر عند تشغيلها
                     const songButtons = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_pause_resume').setEmoji('⏯️').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_pause_resume').setLabel('إيقاف/استئناف').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setLabel('إيقاف نهائي').setStyle(ButtonStyle.Danger)
                     );
-                    await channel.send({ embeds: [embed], components: [songButtons] }).catch(() => {});
+                    const sentTrackMsg = await channel.send({ embeds: [embed], components: [songButtons] }).catch(() => {});
+
+                    // حذف رسالة الأغنية تلقائياً بعد 5 دقائق
+                    setTimeout(async () => {
+                        try {
+                            await sentTrackMsg?.delete().catch(() => {});
+                        } catch (e) {}
+                    }, 5 * 60 * 1000);
                 }
 
-                await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح!' });
+                await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح في الفويس!' });
             } catch (err) {
                 console.error(err);
-                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية.' });
+                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية. تأكد من عمل البث الصوتي.' });
             }
         }
-    }
-});
-
-client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-
-    if (message.content.startsWith('حفظ ')) {
-        const songName = message.content.slice(4).trim();
-        if (!songName) return;
-
-        let voiceChannel = message.member?.voice?.channel;
-        let session = voiceChannel ? activeSessions.get(voiceChannel.id) : null;
-        
-        if (!session) {
-            for (const [chId, sess] of activeSessions.entries()) {
-                const ch = message.guild.channels.cache.get(chId);
-                if (ch && ch.members.has(message.author.id)) {
-                    session = sess;
-                    break;
-                }
-            }
-        }
-
-        if (!session) {
-            return message.reply({ content: 'يجب أن يكون البوت مضافاً في رومك الصوتي لتتمكن من حفظ الأغاني.', ephemeral: true }).catch(() => {});
-        }
-
-        if (!session.savedSongs.includes(songName)) {
-            session.savedSongs.push(songName);
-        }
-
-        await message.react('✅').catch(() => {});
     }
 });
 
