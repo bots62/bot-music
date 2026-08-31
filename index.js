@@ -116,18 +116,19 @@ client.on('interactionCreate', async interaction => {
                         .setColor('#18191c')
                         .setDescription('**Now Playing**\n\nابحث عن أغنية للبدء...');
 
+                    // الأزرار الأولية للتحكم الشامل
                     const row1 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_vol_down').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_pause_resume').setEmoji('⏯️').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_vol_up').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل أغنية').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId('btn_pause_resume').setLabel('إيقاف/استئناف').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setLabel('إيقاف نهائي').setStyle(ButtonStyle.Danger)
                     );
 
                     const row2 = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_search').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('btn_vol_down').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_vol_up').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary)
                     );
 
                     const controlMsg = await targetTextChannel.send({
@@ -337,7 +338,13 @@ client.on('interactionCreate', async interaction => {
 
                 const channel = await client.channels.fetch(session.channelId).catch(() => null);
                 if (channel) {
-                    await channel.send({ embeds: [embed] }).catch(() => {});
+                    // رسالة تفاصيل الأغنية وقائمتها المخفية/الخاصة تظهر عند تشغيلها
+                    const songButtons = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('btn_pause_resume').setEmoji('⏯️').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('btn_stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary)
+                    );
+                    await channel.send({ embeds: [embed], components: [songButtons] }).catch(() => {});
                 }
 
                 await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح!' });
@@ -349,7 +356,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// ميزة حفظ الأغنية عبر كتابة الأمر وإعطاء تفاعل صح
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
