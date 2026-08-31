@@ -11,8 +11,15 @@ const {
     TextInputBuilder, 
     TextInputStyle 
 } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
-const play = require('play-dl');
+const { DisTube } = require('distube');
+const { YtDlpPlugin } = require('@distube/yt-dlp');
+const express = require('express');
+
+// فتح سيرفر بسيط لمنع خطأ البورتات على Render
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(PORT, () => console.log(`Server is listening on port ${PORT}`));
 
 const client = new Client({
     intents: [
@@ -23,6 +30,14 @@ const client = new Client({
         GatewayIntentBits.GuildMembers
     ],
     partials: [Partials.Channel, Partials.Message, Partials.User]
+});
+
+// إعداد DisTube لتجاوز حماية يوتيوب وتشغيل الأغاني بسلاسة
+const distube = new DisTube(client, {
+    emitNewSongOnly: true,
+    leaveOnEmpty: true,
+    leaveOnFinish: false,
+    plugins: [new YtDlpPlugin()]
 });
 
 const PANEL_CHANNEL_ID = '1543145775729746051';
@@ -99,37 +114,22 @@ client.on('interactionCreate', async interaction => {
                 }
 
                 try {
-                    const connection = joinVoiceChannel({
-                        channelId: voiceChannel.id,
-                        guildId: voiceChannel.guild.id,
-                        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-                        selfDeaf: false,
-                        selfMute: false
-                    });
-
-                    const player = createAudioPlayer();
-                    connection.subscribe(player);
-
-                    let targetTextChannel = voiceChannel;
-
                     const controlEmbed = new EmbedBuilder()
                         .setColor('#18191c')
                         .setDescription('**تحكم ببوت الأغاني من هنا**');
 
-                    // الصف الأول: تشغيل أغنية، إيقاف/استئناف، إيقاف نهائي
                     const row1 = new ActionRowBuilder().addComponents(
                         new ButtonBuilder().setCustomId('btn_search').setLabel('تشغيل أغنية').setStyle(ButtonStyle.Primary),
                         new ButtonBuilder().setCustomId('btn_pause_resume').setLabel('إيقاف/استئناف').setStyle(ButtonStyle.Secondary),
                         new ButtonBuilder().setCustomId('btn_stop').setLabel('إيقاف نهائي').setStyle(ButtonStyle.Danger)
                     );
 
-                    // الصف الثاني: صلاحية، إزالة صلاحية
                     const row2 = new ActionRowBuilder().addComponents(
                         new ButtonBuilder().setCustomId('btn_allow').setLabel('صلاحية').setStyle(ButtonStyle.Success),
                         new ButtonBuilder().setCustomId('btn_disallow').setLabel('إزالة صلاحية').setStyle(ButtonStyle.Secondary)
                     );
 
-                    const controlMsg = await targetTextChannel.send({
+                    const controlMsg = await voiceChannel.send({
                         embeds: [controlEmbed],
                         components: [row1, row2]
                     });
@@ -137,25 +137,15 @@ client.on('interactionCreate', async interaction => {
                     // حذف رسالة التحكم تلقائياً بعد 5 دقائق
                     setTimeout(async () => {
                         try {
-                            if (activeSessions.has(voiceChannel.id)) {
-                                await controlMsg.delete().catch(() => {});
-                            }
+                            await controlMsg.delete().catch(() => {});
                         } catch (e) {}
                     }, 5 * 60 * 1000);
 
                     activeSessions.set(voiceChannel.id, {
-                        connection,
-                        player,
                         ownerId: member.id,
                         allowedUsers: [member.id],
-                        volume: 100,
-                        currentSong: null,
-                        currentSongData: null,
-                        savedSongs: [],
-                        savedIndex: 0,
-                        isPaused: false,
                         controlMsgId: controlMsg.id,
-                        channelId: targetTextChannel.id
+                        channelId: voiceChannel.id
                     });
 
                     await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
@@ -181,6 +171,7 @@ client.on('interactionCreate', async interaction => {
                 const ch = interaction.guild.channels.cache.get(chId);
                 if (ch && ch.members.has(member.id)) {
                     session = sess;
+                    voiceChannel = ch;
                     break;
                 }
             }
@@ -213,33 +204,31 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (customId === 'btn_stop') {
-            if (session.player) {
-                session.player.stop();
-                session.currentSong = null;
-                session.currentSongData = null;
-            }
-            if (session.connection) {
-                session.connection.destroy();
-            }
+            try {
+                await distube.stop(voiceChannel);
+            } catch (e) {}
             activeSessions.delete(voiceChannel?.id);
             return interaction.reply({ content: `تم إيقاف البوت وإخراجه بواسطة <@${member.id}>`, ephemeral: true });
         }
 
         if (customId === 'btn_pause_resume') {
-            if (!session.player) return interaction.reply({ content: 'لا توجد أغنية مشغلة حالياً', ephemeral: true });
-            if (session.isPaused) {
-                session.player.unpause();
-                session.isPaused = false;
-                return interaction.reply({ content: 'تم استئناف الأغنية', ephemeral: true });
-            } else {
-                session.player.pause();
-                session.isPaused = true;
-                return interaction.reply({ content: 'تم إيقاف الأغنية مؤقتاً', ephemeral: true });
+            try {
+                const queue = distube.getQueue(voiceChannel);
+                if (!queue) return interaction.reply({ content: 'لا توجد أغنية مشغلة حالياً', ephemeral: true });
+                if (queue.paused) {
+                    distube.resume(voiceChannel);
+                    return interaction.reply({ content: 'تم استئناف الأغنية', ephemeral: true });
+                } else {
+                    distube.pause(voiceChannel);
+                    return interaction.reply({ content: 'تم إيقاف الأغنية مؤقتاً', ephemeral: true });
+                }
+            } catch (e) {
+                return interaction.reply({ content: 'حدث خطأ أثناء التحكم بالتشغيل', ephemeral: true });
             }
         }
 
         if (customId === 'btn_allow') {
-            return interaction.reply({ content: 'منشن العضو لإعطائه الصلاحية أو استخدم نظام الصلاحيات المخصص.', ephemeral: true });
+            return interaction.reply({ content: 'منشن العضو لإعطائه الصلاحية.', ephemeral: true });
         }
 
         if (customId === 'btn_disallow') {
@@ -262,12 +251,13 @@ client.on('interactionCreate', async interaction => {
                 const ch = interaction.guild.channels.cache.get(chId);
                 if (ch && ch.members.has(member.id)) {
                     session = sess;
+                    voiceChannel = ch;
                     break;
                 }
             }
         }
 
-        if (!session) return;
+        if (!session || !voiceChannel) return;
 
         if (interaction.customId === 'search_song_modal') {
             const query = interaction.fields.getTextInputValue('song_query');
@@ -275,68 +265,17 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                // البحث عبر play-dl وجلب النمط الصحيح للبث
-                const searchResults = await play.search(query, { limit: 1 });
-                if (!searchResults || searchResults.length === 0) {
-                    return interaction.editReply({ content: 'لم يتم العثور على نتائج لهذه الأغنية.' });
-                }
-                const track = searchResults[0];
-                session.currentSongData = track;
-
-                const streamData = await play.stream(track.url);
-                const resource = createAudioResource(streamData.stream, {
-                    inputType: streamData.type,
-                    inlineVolume: true
+                // استخدام DisTube لتشغيل الأغنية وتجاوز حظر يوتيوب تلقائياً
+                await distube.play(voiceChannel, query, {
+                    textChannel: voiceChannel,
+                    member: member
                 });
-
-                resource.volume.setVolume(session.volume / 100);
-                session.player.play(resource);
-
-                const embed = new EmbedBuilder()
-                    .setColor('#18191c')
-                    .setTitle('Now Playing')
-                    .setDescription(`**${track.title}**\nby <@${member.id}>\n\nDuration: ${track.duration}\nPlatform: YouTube`)
-                    .setThumbnail(track.thumbnail);
-
-                const channel = await client.channels.fetch(session.channelId).catch(() => null);
-                if (channel) {
-                    const songButtons = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('btn_pause_resume').setLabel('إيقاف/استئناف').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('btn_stop').setLabel('إيقاف نهائي').setStyle(ButtonStyle.Danger)
-                    );
-                    const sentTrackMsg = await channel.send({ embeds: [embed], components: [songButtons] }).catch(() => {});
-
-                    // حذف رسالة الأغنية تلقائياً بعد 5 دقائق
-                    setTimeout(async () => {
-                        try {
-                            await sentTrackMsg?.delete().catch(() => {});
-                        } catch (e) {}
-                    }, 5 * 60 * 1000);
-                }
 
                 await interaction.editReply({ content: 'تم تشغيل الأغنية بنجاح في الفويس!' });
             } catch (err) {
                 console.error(err);
-                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية. تأكد من عمل البث الصوتي.' });
+                await interaction.editReply({ content: 'حدث خطأ أثناء تشغيل الأغنية. تأكد من صحة البحث.' });
             }
-        }
-    }
-});
-
-client.on('voiceStateUpdate', async (oldState, newState) => {
-    for (const [channelId, session] of activeSessions.entries()) {
-        if (oldState.member && oldState.member.id === session.ownerId && oldState.channelId === channelId && newState.channelId !== channelId) {
-            try {
-                if (session.connection) session.connection.destroy();
-                if (session.controlMsgId) {
-                    const channel = await client.channels.fetch(session.channelId).catch(() => null);
-                    if (channel) {
-                        const msg = await channel.messages.fetch(session.controlMsgId).catch(() => null);
-                        if (msg) await msg.delete().catch(() => {});
-                    }
-                }
-            } catch (e) {}
-            activeSessions.delete(channelId);
         }
     }
 });
