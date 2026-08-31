@@ -15,7 +15,6 @@ const { DisTube } = require('distube');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
 const express = require('express');
 
-// فتح سيرفر بسيط لمنع خطأ البورتات على Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
@@ -32,7 +31,6 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// إعداد DisTube لتجاوز حماية يوتيوب وتشغيل الأغاني بسلاسة
 const distube = new DisTube(client, {
     emitNewSongOnly: true,
     leaveOnEmpty: true,
@@ -95,6 +93,7 @@ client.on('interactionCreate', async interaction => {
                 voiceChannel = guildMember?.voice?.channel;
             }
 
+            // إرجاع القائمة لحالتها الطبيعية فوراً لكي تستطيع الضغط عليها مراراً وتكراراً بدون تعليق الصح
             await interaction.update({ components: [
                 new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -109,11 +108,10 @@ client.on('interactionCreate', async interaction => {
                     return interaction.followUp({ content: 'أنت لست في روم صوتي!', ephemeral: true });
                 }
 
-                if (activeSessions.has(voiceChannel.id)) {
-                    return interaction.followUp({ content: 'هذا الروم يحتوي على بوت مضاف مسبقاً!', ephemeral: true });
-                }
-
                 try {
+                    // إدخال البوت فعلياً للروم الصوتي عبر DisTube
+                    await distube.voices.join(voiceChannel);
+
                     const controlEmbed = new EmbedBuilder()
                         .setColor('#18191c')
                         .setDescription('**تحكم ببوت الأغاني من هنا**');
@@ -151,6 +149,7 @@ client.on('interactionCreate', async interaction => {
                     await interaction.followUp({ content: 'تم إدخال البوت لرومك الصوتي بنجاح!', ephemeral: true });
                 } catch (err) {
                     console.error(err);
+                    await interaction.followUp({ content: 'حدث خطأ أثناء محاولة دخول الروم الصوتي.', ephemeral: true });
                 }
             }
         }
@@ -206,6 +205,7 @@ client.on('interactionCreate', async interaction => {
         if (customId === 'btn_stop') {
             try {
                 await distube.stop(voiceChannel);
+                await distube.voices.leave(voiceChannel);
             } catch (e) {}
             activeSessions.delete(voiceChannel?.id);
             return interaction.reply({ content: `تم إيقاف البوت وإخراجه بواسطة <@${member.id}>`, ephemeral: true });
@@ -265,7 +265,6 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                // استخدام DisTube لتشغيل الأغنية وتجاوز حظر يوتيوب تلقائياً
                 await distube.play(voiceChannel, query, {
                     textChannel: voiceChannel,
                     member: member
